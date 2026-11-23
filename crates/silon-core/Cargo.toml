@@ -1,0 +1,11 @@
+[package]
+name = "silon-core"
+description = "Pure TEA core of Silon: Feature, Command, EffectRunner and TestHarness"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+schemars.workspace = true
+serde.workspace = true

@@ -1,0 +1,15 @@
+[package]
+name = "counter-core"
+description = "Pure counter feature for the Silon example app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+schemars.workspace = true
+serde.workspace = true
+silon-core.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
