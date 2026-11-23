@@ -15,6 +15,9 @@ fn main() {
     Application::new().run(|cx: &mut App| {
         let store = cx.new(|_| CounterStore::new(CounterState::default(), CounterEffectRunner));
 
+        #[cfg(feature = "introspect")]
+        start_introspection(&store, cx);
+
         let bounds = Bounds::centered(None, size(px(420.), px(320.)), cx);
         cx.open_window(
             WindowOptions {
@@ -33,4 +36,16 @@ fn main() {
         .detach();
         cx.activate(true);
     });
+}
+
+#[cfg(feature = "introspect")]
+fn start_introspection(store: &gpui::Entity<CounterStore>, cx: &mut App) {
+    let registry = silon_introspect::IntrospectionRegistry::default();
+    registry.register(store.update(cx, |store, cx| store.attach_introspection("counter", cx)));
+
+    let addr = silon_introspect::DEFAULT_ADDR;
+    match silon_introspect::spawn_server(registry, addr) {
+        Ok(_) => eprintln!("introspection server listening on http://{addr}"),
+        Err(err) => eprintln!("introspection server failed to start on {addr}: {err}"),
+    }
 }

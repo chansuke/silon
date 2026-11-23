@@ -6,9 +6,14 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+## Serves the counter on http://127.0.0.1:3737 for agents.
+introspect = ["silon-gpui/introspect", "dep:silon-introspect"]
+
 [dependencies]
 counter-core.workspace = true
 gpui.workspace = true
 silon-core.workspace = true
 silon-gpui.workspace = true
 smol.workspace = true
+silon-introspect = { workspace = true, optional = true }

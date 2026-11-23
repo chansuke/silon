@@ -6,12 +6,24 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+## Lets external agents read state and dispatch actions over HTTP.
+introspect = ["dep:silon-introspect", "dep:schemars", "dep:serde_json", "dep:tokio"]
+
 [dependencies]
 gpui.workspace = true
 silon-core.workspace = true
+schemars = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+silon-introspect = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, features = ["sync"] }
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
 schemars.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 
+[[test]]
+name = "introspect"
+required-features = ["introspect"]
