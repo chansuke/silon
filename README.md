@@ -9,6 +9,7 @@ milestones.
 ```sh
 nix develop
 cargo test -p silon-core -p counter-core
+scripts/check-architecture.sh                    # crate boundaries from AGENTS.md
 cargo run -p counter-app
 cargo run -p counter-app --features introspect   # HTTP API on 127.0.0.1:3737
 ```
