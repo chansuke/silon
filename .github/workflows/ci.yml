@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # The checks from AGENTS.md section 6, in the order it gives.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          # Run cargo and rustc from the dev shell, not the runner's rustup.
+          cmd-format: nix develop -c {0}
+          # Pull requests restore the cache that main saves.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Test the pure crates
+        run: nix develop -c cargo test --locked -p silon-core -p counter-core
+      - name: Typecheck
+        run: |
+          nix develop -c cargo check --locked --workspace --all-targets
+          nix develop -c cargo check --locked --workspace --all-features
+      - name: Run clippy
+        run: |
+          nix develop -c cargo clippy --locked --workspace --all-targets -- -D warnings
+          nix develop -c cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+      - name: Check formatting
+        run: nix develop -c cargo fmt --all --check
+      - name: Check crate boundaries
+        run: nix develop -c scripts/check-architecture.sh
+      # GPUI's test platform needs no window, so the store wiring and the
+      # introspection server are tested here as well.
+      - name: Test the workspace
+        run: nix develop -c cargo test --locked --workspace --all-features
