@@ -205,7 +205,29 @@ Execute one phase at a time. **Do NOT proceed to the next phase until all accept
 
 ---
 
+### Phase 4: Design Tokens, Primitives & Stateful Widget Adapters (`silon-ui`)
+**Scope:**
+1. Add `crates/silon-ui` (depends on `gpui` and `silon-gpui`; NO `silon-introspect`):
+   - `Theme` (a `gpui::Global`) with semantic color tokens, a spacing scale (`Space`), radii and text sizes. `silon_ui::init(cx)` installs the default dark theme; `Theme::of(cx)` reads it.
+   - Stateless `RenderOnce` primitives built only from tokens: `Stack` (vertical), `Row` (horizontal), `Panel`, `Text`, `Button`, `Badge`, `Checkbox`. `Stack::screen()` is the window-level container that paints the background.
+   - `Button` and `Checkbox` dispatch through `Dispatcher` (`on_press(&dispatcher, action)`), so views never write raw event closures for simple actions.
+2. Optional `components` feature wrapping `gpui-component = "=0.5.1"` (the last release on crates.io `gpui` 0.2.x; 0.6+ depends on the `gpui-pre` fork):
+   - `TextInput` adapter: IME-aware single-line input. Cursor, selection and IME composition stay inside the widget (`Window::use_keyed_state`). It takes the current value from `State` and emits `Dispatcher<String>` callbacks only for `on_change`, `on_submit` (Enter) and `on_blur`. Values pushed from `State` (e.g. clearing after submit) do not echo back as `on_change`.
+   - `components::init(cx)` and `components::window_root(view, window, cx)` (gpui-component widgets require `gpui_component::Root` as the window root).
+3. Migrate `examples/counter/counter-app` to `silon-ui` primitives and remove its ad-hoc colors.
+4. Add `examples/todo/{todo-core,todo-app}`:
+   - `TodoState { draft: String, items: Vec<TodoItem>, next_id: u64 }`, `TodoItem { id: u64, title: String, done: bool }`.
+   - `TodoAction { DraftChanged(String), Submit, Toggle(u64), Remove(u64), ClearCompleted }`; `Submit` trims the draft, ignores blank drafts, appends an item and clears the draft. No effects (`Effect = std::convert::Infallible`), run with `silon_core::NoEffects`, the runner for every feature without effects.
+   - `todo-app` uses `TextInput` and the primitives, and supports `--features introspect` (feature name `todo`).
+
+**Acceptance Checks:**
+- All checks in `AGENTS.md` section 6 pass, and `scripts/check-architecture.sh` also covers `todo-core`, `silon-ui` (no `silon-introspect`) and forbids raw colors (`rgb(`, `rgba(`, `hsla(`) in `examples/*/*-app/src`.
+- `cargo test -p todo-core` covers every `TodoAction` branch with `TestHarness`.
+- `cargo run -p counter-app` looks and behaves as in Phase 2.
+- `cargo run -p todo-app --features introspect`: typing and Enter adds an item and clears the input; `POST /dispatch/todo` with `{"DraftChanged":"..."}` updates the visible input text; `Toggle`/`Remove` via clicks and via HTTP both update the window.
+
+---
+
 ## 4. Out of Scope for MVP (Do NOT Implement Yet)
-- `silon-ui` design token system and `gpui-component` wrappers (defer to Phase 4).
 - MCP (Model Context Protocol) stdio/SSE server wrapper (defer until HTTP endpoints in Phase 3 are verified).
 - Action history ring buffer / time-travel replay.
