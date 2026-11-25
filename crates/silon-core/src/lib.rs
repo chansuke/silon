@@ -75,6 +75,16 @@ pub trait EffectRunner<F: Feature>: 'static {
     fn run(&self, effect: F::Effect) -> BoxFuture<'static, Option<F::Action>>;
 }
 
+/// The runner for features without effects, i.e. whose `Effect` is
+/// [`Infallible`](std::convert::Infallible).
+pub struct NoEffects;
+
+impl<F: Feature<Effect = std::convert::Infallible>> EffectRunner<F> for NoEffects {
+    fn run(&self, effect: std::convert::Infallible) -> BoxFuture<'static, Option<F::Action>> {
+        match effect {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Command;
