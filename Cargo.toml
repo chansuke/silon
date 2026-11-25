@@ -5,6 +5,7 @@ members = [
     "crates/silon-introspect",
     "crates/silon-gpui",
     "crates/silon-ui",
+    "crates/silon-mcp",
     "examples/counter/counter-core",
     "examples/counter/counter-app",
     "examples/todo/todo-core",
@@ -35,3 +36,6 @@ tokio = { version = "1", default-features = false }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
 smol = "2"
 tower = { version = "0.5", default-features = false }
+rmcp = { version = "3.11", default-features = false }
+# Plain HTTP to a loopback address: no TLS, no proxy detection.
+reqwest = { version = "0.13", default-features = false }
