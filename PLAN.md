@@ -123,6 +123,14 @@ pub enum IntrospectionCommand {
     GetSchema {
         reply: tokio::sync::oneshot::Sender<serde_json::Value>,
     },
+    // Phase 5
+    GetHistory {
+        reply: tokio::sync::oneshot::Sender<serde_json::Value>,
+    },
+    Replay {
+        through: Option<u64>,
+        reply: tokio::sync::oneshot::Sender<Result<serde_json::Value, String>>,
+    },
 }
 
 #[derive(Clone)]
@@ -134,6 +142,8 @@ impl StoreHandle {
     pub async fn get_state(&self) -> Result<serde_json::Value, String>;
     pub async fn dispatch_json(&self, action_json: serde_json::Value) -> Result<serde_json::Value, String>;
     pub async fn get_schema(&self) -> Result<serde_json::Value, String>;
+    pub async fn get_history(&self) -> Result<serde_json::Value, String>; // Phase 5
+    pub async fn replay(&self, through: Option<u64>) -> Result<serde_json::Value, String>; // Phase 5
 }
 
 #[derive(Clone, Default)]
@@ -191,7 +201,7 @@ Execute one phase at a time. **Do NOT proceed to the next phase until all accept
      - `GET /state/:name` -> returns current `State` JSON.
      - `POST /dispatch/:name` -> accepts `Action` JSON body, dispatches to GPUI main thread, returns updated `State` JSON.
 2. Add `#[cfg(feature = "introspect")]` integration to `silon-gpui`:
-   - `Store::attach_introspection(&self, name: impl Into<String>, cx: &mut Context<Self>) -> StoreHandle`.
+   - `Store::attach_introspection(&mut self, name: impl Into<String>, cx: &mut Context<Self>) -> StoreHandle` (`&mut self` since Phase 5, which starts the action history here).
    - Use `schemars::schema_for!(F::Action)` for `GetSchema`.
 3. Wire `introspect` feature into `examples/counter/counter-app` so running with `--features introspect` starts the background HTTP server on `127.0.0.1:3737`.
 
@@ -228,6 +238,27 @@ Execute one phase at a time. **Do NOT proceed to the next phase until all accept
 
 ---
 
+### Phase 5: Action History, Replay & MCP Server (`silon-mcp`)
+**Scope:**
+1. Action history in `silon-gpui`, behind the `introspect` feature only:
+   - `Store::attach_introspection` starts recording. The store keeps its state at that moment as the *base* and every action that later goes through `Store::dispatch` (UI events, effect follow-ups, HTTP) as JSON, in a ring buffer of `HISTORY_CAPACITY` (256) entries. Each entry has a sequence number `seq`, counted from 0 at attach.
+   - When the buffer is full, the oldest entry is folded into the base with `F::update` (its effects are discarded), so the base followed by the entries always reproduces the current state.
+   - Replay is read-only: it runs `F::update` over a copy of the base and never changes the live store, so nothing bypasses `Store::dispatch`.
+2. New `IntrospectionCommand`s and HTTP routes in `silon-introspect`:
+   - `GetHistory` / `GET /history/{name}` -> `{"base": State, "dropped": n, "entries": [{"seq": n, "action": Action}]}`, where `dropped` is the number of actions no longer listed.
+   - `Replay { through }` / `GET /replay/{name}?through=SEQ` -> `{"state": State, "through": SEQ or null, "matches_current": bool}`: the state right after entry `through` (after all entries without `through`), and whether it equals the live state. A `through` that was dropped or not recorded yet is a 400.
+3. Add `crates/silon-mcp`, a binary that serves MCP over stdio with the official `rmcp` SDK and forwards to the HTTP API of a running app (`--url`, default `http://127.0.0.1:3737`). It depends on no GPUI and on no Silon crate (only as a dev-dependency, for tests).
+   - Tools: `list_features`, `get_state`, `dispatch_action`, `get_history`, `replay`.
+   - HTTP errors and an unreachable app are tool errors (`isError: true`) with the message, not protocol errors.
+
+**Acceptance Checks:**
+- All checks in `AGENTS.md` section 6 pass, and `scripts/check-architecture.sh` also forbids `gpui` in `silon-mcp` and `rmcp` in the apps.
+- `cargo test -p silon-gpui --features introspect` covers recording (including effect follow-ups), folding at capacity, replay through a `seq`, and rejected `through` values.
+- `cargo test -p silon-mcp` drives the real binary over stdio (`initialize`, `tools/list`, `tools/call`) against the real router.
+- With `cargo run -p todo-app --features introspect` and `silon-mcp` connected over stdio: `dispatch_action` updates the window, `get_history` lists actions from clicks, typing and MCP in order, and `replay` returns `"matches_current": true`.
+
+---
+
 ## 4. Out of Scope for MVP (Do NOT Implement Yet)
-- MCP (Model Context Protocol) stdio/SSE server wrapper (defer until HTTP endpoints in Phase 3 are verified).
-- Action history ring buffer / time-travel replay.
+- MCP over SSE or streamable HTTP (stdio only).
+- Restoring a past state into the live store (time travel that writes state).
