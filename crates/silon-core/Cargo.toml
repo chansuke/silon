@@ -9,3 +9,6 @@ publish.workspace = true
 [dependencies]
 schemars.workspace = true
 serde.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
