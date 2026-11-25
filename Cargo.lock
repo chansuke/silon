@@ -1267,6 +1267,7 @@ dependencies = [
  "silon-core",
  "silon-gpui",
  "silon-introspect",
+ "silon-ui",
  "smol",
 ]
 

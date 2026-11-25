@@ -15,5 +15,6 @@ counter-core.workspace = true
 gpui.workspace = true
 silon-core.workspace = true
 silon-gpui.workspace = true
+silon-ui.workspace = true
 smol.workspace = true
 silon-introspect = { workspace = true, optional = true }

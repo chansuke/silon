@@ -1,5 +1,4 @@
 mod effects;
-mod theme;
 mod view;
 
 use counter_core::{CounterFeature, CounterState};
@@ -13,6 +12,7 @@ type CounterStore = Store<CounterFeature, CounterEffectRunner>;
 
 fn main() {
     Application::new().run(|cx: &mut App| {
+        silon_ui::init(cx);
         let store = cx.new(|_| CounterStore::new(CounterState::default(), CounterEffectRunner));
 
         #[cfg(feature = "introspect")]
