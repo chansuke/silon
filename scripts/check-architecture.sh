@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Checks the crate boundaries from AGENTS.md: pure crates link neither gpui
-# nor tokio, silon-introspect links no gpui, and an app built without the
-# `introspect` feature links no axum.
+# Checks the boundaries from AGENTS.md: pure crates link neither gpui nor
+# tokio, silon-introspect links no gpui, silon-ui links no silon-introspect,
+# an app built without the `introspect` feature links no axum, and app views
+# take colors from silon-ui tokens instead of raw color literals.
 set -euo pipefail
 
 status=0
@@ -23,7 +24,19 @@ forbid() {
 
 forbid silon-core 'gpui|tokio'
 forbid counter-core 'gpui|tokio'
+forbid todo-core 'gpui|tokio'
 forbid silon-introspect 'gpui'
+forbid silon-ui 'silon-introspect' --all-features
 forbid counter-app 'axum'
+forbid todo-app 'axum'
+
+raw_colors=$(grep -rnE '\b(rgb|rgba|hsla)\(' examples/*/*-app/src || true)
+if [[ -n $raw_colors ]]; then
+  echo "error: app sources use raw colors; use silon-ui tokens instead:" >&2
+  while read -r line; do echo "  $line" >&2; done <<<"$raw_colors"
+  status=1
+else
+  echo "ok: app sources use no raw colors"
+fi
 
 exit "$status"
