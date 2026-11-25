@@ -1,4 +1,5 @@
 /target
 /result
+/mutants.out*
 # Quint and Apalache write their logs next to the specification.
 /spec/_apalache-out
