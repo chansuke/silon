@@ -41,15 +41,24 @@
             {
               nativeBuildInputs = [ pkgs.pkg-config ];
               buildInputs = lib.optionals stdenv.hostPlatform.isLinux (linuxRuntimeLibs pkgs);
-              packages = with pkgs; [
-                cargo
-                rustc
-                clippy
-                rustfmt
-                rust-analyzer
-                curl
-              ]
-              ++ lib.optionals stdenv.hostPlatform.isLinux [ mold ];
+              packages =
+                with pkgs;
+                [
+                  cargo
+                  rustc
+                  clippy
+                  rustfmt
+                  rust-analyzer
+                  curl
+                  # Checks that CI runs (see .github/workflows).
+                  cargo-deny
+                  cargo-mutants
+                  typos
+                  actionlint
+                  shellcheck
+                  nixfmt
+                ]
+                ++ lib.optionals stdenv.hostPlatform.isLinux [ mold ];
             }
             // lib.optionalAttrs stdenv.hostPlatform.isLinux {
               LD_LIBRARY_PATH = lib.makeLibraryPath (linuxRuntimeLibs pkgs);

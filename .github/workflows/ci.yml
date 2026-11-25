@@ -24,7 +24,7 @@ jobs:
           # Pull requests restore the cache that main saves.
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Test the pure crates
-        run: nix develop -c cargo test --locked -p silon-core -p counter-core
+        run: nix develop -c cargo test --locked -p silon-core -p counter-core -p todo-core
       - name: Typecheck
         run: |
           nix develop -c cargo check --locked --workspace --all-targets
@@ -35,6 +35,11 @@ jobs:
           nix develop -c cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       - name: Check formatting
         run: nix develop -c cargo fmt --all --check
+      # Broken intra-doc links and malformed doc comments fail here.
+      - name: Check documentation
+        run: nix develop -c cargo doc --locked --workspace --all-features --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
       - name: Check crate boundaries
         run: nix develop -c scripts/check-architecture.sh
       # GPUI's test platform needs no window, so the store wiring and the
