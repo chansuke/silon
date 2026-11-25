@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Checks the boundaries from AGENTS.md: pure crates link neither gpui nor
 # tokio, silon-introspect links no gpui, silon-ui links no silon-introspect,
-# an app built without the `introspect` feature links no axum, and app views
-# take colors from silon-ui tokens instead of raw color literals.
+# silon-mcp links neither gpui nor other Silon crates (it only speaks HTTP),
+# an app built without the `introspect` feature links no axum, no app links
+# rmcp, and app views take colors from silon-ui tokens instead of raw color
+# literals.
 set -euo pipefail
 
 status=0
@@ -27,8 +29,11 @@ forbid counter-core 'gpui|tokio'
 forbid todo-core 'gpui|tokio'
 forbid silon-introspect 'gpui'
 forbid silon-ui 'silon-introspect' --all-features
+forbid silon-mcp 'gpui|silon-core|silon-gpui|silon-introspect|silon-ui'
 forbid counter-app 'axum'
 forbid todo-app 'axum'
+forbid counter-app 'rmcp' --all-features
+forbid todo-app 'rmcp' --all-features
 
 raw_colors=$(grep -rnE '\b(rgb|rgba|hsla)\(' examples/*/*-app/src || true)
 if [[ -n $raw_colors ]]; then
