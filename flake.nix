@@ -69,6 +69,10 @@
               RUSTFLAGS = "-C link-arg=-fuse-ld=mold";
             }
           );
+
+          # Quint and the Apalache model checker it runs, which need a JDK.
+          # Kept out of the default shell: `nix develop .#spec`.
+          spec = pkgs.mkShell { packages = [ pkgs.quint ]; };
         }
       );
 

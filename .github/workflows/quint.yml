@@ -1,0 +1,49 @@
+name: Quint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # Checks spec/StoreProtocol.qnt with the random simulator and with Apalache,
+  # which checks every behavior up to --max-steps steps.
+  spec:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: spec
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
+      - name: Typecheck
+        run: nix develop ..#spec -c quint typecheck StoreProtocol.qnt
+      # A fixed seed keeps the simulation the same on every run.
+      - name: Simulate
+        run: |
+          nix develop ..#spec -c quint run --seed=0x5110 --max-samples=10000 --max-steps=20 \
+            --invariant="replayMatches and historyBounded and countInBounds" StoreProtocol.qnt
+          nix develop ..#spec -c quint run --seed=0x5110 --max-samples=10000 --max-steps=20 \
+            --step=uiStep --invariant=oneAddInFlight StoreProtocol.qnt
+      - name: Check every behavior up to the bound
+        run: |
+          nix develop ..#spec -c quint verify --max-steps=6 \
+            --invariant="replayMatches and historyBounded and countInBounds" StoreProtocol.qnt
+          nix develop ..#spec -c quint verify --max-steps=6 \
+            --step=uiStep --invariant=oneAddInFlight StoreProtocol.qnt
+      # The specification states that an agent can break oneAddInFlight. If
+      # the model stops finding that trace, the model or the statement is wrong.
+      - name: Check that an agent breaks oneAddInFlight
+        run: |
+          if nix develop ..#spec -c quint run --seed=0x5110 --max-samples=10000 --max-steps=20 \
+            --invariant=oneAddInFlight StoreProtocol.qnt > "$RUNNER_TEMP/agent.txt"; then
+            echo "::error::no trace breaks oneAddInFlight with an agent"
+            exit 1
+          fi
+          grep -q 'AsyncAddCompleted' "$RUNNER_TEMP/agent.txt"
