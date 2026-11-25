@@ -5,6 +5,9 @@ use silon_core::{EffectRunner, Feature};
 pub struct Store<F: Feature, R: EffectRunner<F>> {
     state: F::State,
     runner: R,
+    /// Recorded actions, started by `attach_introspection`.
+    #[cfg(feature = "introspect")]
+    pub(crate) history: Option<crate::history::History<F>>,
 }
 
 impl<F: Feature, R: EffectRunner<F>> Store<F, R> {
@@ -12,6 +15,8 @@ impl<F: Feature, R: EffectRunner<F>> Store<F, R> {
         Self {
             state: initial_state,
             runner,
+            #[cfg(feature = "introspect")]
+            history: None,
         }
     }
 
@@ -25,7 +30,19 @@ impl<F: Feature, R: EffectRunner<F>> Store<F, R> {
     /// return is dispatched back on the main thread. Follow-ups are dropped if
     /// the store has been released by then.
     pub fn dispatch(&mut self, action: F::Action, cx: &mut Context<Self>) {
+        #[cfg(feature = "introspect")]
+        let recorded = self
+            .history
+            .is_some()
+            .then(|| serde_json::to_value(&action));
+
         let effects = F::update(&mut self.state, action).into_effects();
+
+        #[cfg(feature = "introspect")]
+        if let (Some(history), Some(recorded)) = (&mut self.history, recorded) {
+            history.record(recorded, &self.state);
+        }
+
         cx.notify();
 
         for effect in effects {

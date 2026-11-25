@@ -26,6 +26,15 @@ pub enum IntrospectionCommand {
     GetSchema {
         reply: oneshot::Sender<serde_json::Value>,
     },
+    /// Asks for the recorded actions, see [`StoreHandle::get_history`].
+    GetHistory {
+        reply: oneshot::Sender<serde_json::Value>,
+    },
+    /// Asks for a replay of the recorded actions, see [`StoreHandle::replay`].
+    Replay {
+        through: Option<u64>,
+        reply: oneshot::Sender<Result<serde_json::Value, String>>,
+    },
 }
 
 /// A named, cloneable channel to one store.
@@ -69,6 +78,22 @@ impl StoreHandle {
             .await
     }
 
+    /// Returns the actions recorded since introspection was attached:
+    /// `{"base": state, "dropped": n, "entries": [{"seq": n, "action": action}]}`.
+    /// Applying the entries to `base` in order gives the current state.
+    pub async fn get_history(&self) -> Result<serde_json::Value, String> {
+        self.request(|reply| IntrospectionCommand::GetHistory { reply })
+            .await
+    }
+
+    /// Replays the recorded actions from the base up to and including entry
+    /// `through` (all of them for `None`) without touching the live store:
+    /// `{"state": state, "through": seq, "matches_current": bool}`.
+    pub async fn replay(&self, through: Option<u64>) -> Result<serde_json::Value, String> {
+        self.request(|reply| IntrospectionCommand::Replay { through, reply })
+            .await?
+    }
+
     async fn request<T>(
         &self,
         command: impl FnOnce(oneshot::Sender<T>) -> IntrospectionCommand,
@@ -93,7 +118,7 @@ mod tests {
     pub(crate) fn fake_store(name: &str) -> StoreHandle {
         let (tx, mut rx) = mpsc::unbounded_channel();
         tokio::spawn(async move {
-            let mut count = 0;
+            let mut count = 0_u64;
             while let Some(command) = rx.recv().await {
                 match command {
                     IntrospectionCommand::GetState { reply } => {
@@ -110,6 +135,28 @@ mod tests {
                     }
                     IntrospectionCommand::GetSchema { reply } => {
                         reply.send(json!({ "enum": ["Increment"] })).ok();
+                    }
+                    IntrospectionCommand::GetHistory { reply } => {
+                        let entries: Vec<_> = (0..count)
+                            .map(|seq| json!({ "seq": seq, "action": "Increment" }))
+                            .collect();
+                        let history =
+                            json!({ "base": { "count": 0 }, "dropped": 0, "entries": entries });
+                        reply.send(history).ok();
+                    }
+                    IntrospectionCommand::Replay { through, reply } => {
+                        let result = match through {
+                            None => Ok(
+                                json!({ "state": { "count": count }, "through": null, "matches_current": true }),
+                            ),
+                            Some(seq) if seq < count => Ok(json!({
+                                "state": { "count": seq + 1 },
+                                "through": seq,
+                                "matches_current": seq + 1 == count,
+                            })),
+                            Some(seq) => Err(format!("entry {seq} has not been recorded")),
+                        };
+                        reply.send(result).ok();
                     }
                 }
             }
@@ -131,6 +178,22 @@ mod tests {
         assert_eq!(
             handle.get_schema().await,
             Ok(json!({ "enum": ["Increment"] }))
+        );
+        assert_eq!(
+            handle.get_history().await,
+            Ok(json!({
+                "base": { "count": 0 },
+                "dropped": 0,
+                "entries": [{ "seq": 0, "action": "Increment" }],
+            }))
+        );
+        assert_eq!(
+            handle.replay(Some(0)).await,
+            Ok(json!({ "state": { "count": 1 }, "through": 0, "matches_current": true }))
+        );
+        assert_eq!(
+            handle.replay(Some(1)).await,
+            Err("entry 1 has not been recorded".to_string())
         );
     }
 

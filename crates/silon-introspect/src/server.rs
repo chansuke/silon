@@ -4,15 +4,19 @@
 //! - `GET /state/{name}` returns a feature's state.
 //! - `POST /dispatch/{name}` dispatches the JSON body as an action and returns
 //!   the updated state.
+//! - `GET /history/{name}` returns the actions recorded since attach.
+//! - `GET /replay/{name}[?through=SEQ]` replays them without changing the store.
 
 use std::net::{SocketAddr, TcpListener};
 use std::thread::JoinHandle;
 
-use axum::extract::{Path, State};
+use axum::extract::rejection::QueryRejection;
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::{IntrospectionRegistry, StoreHandle};
@@ -26,6 +30,8 @@ pub fn router(registry: IntrospectionRegistry) -> Router {
         .route("/features", get(list_features))
         .route("/state/{name}", get(get_state))
         .route("/dispatch/{name}", post(dispatch))
+        .route("/history/{name}", get(get_history))
+        .route("/replay/{name}", get(replay))
         .with_state(registry)
 }
 
@@ -90,6 +96,35 @@ async fn dispatch(
         .await
         .map_err(ApiError::bad_request)?;
     Ok(Json(state))
+}
+
+async fn get_history(
+    State(registry): State<IntrospectionRegistry>,
+    Path(name): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let history = find(&registry, &name)?
+        .get_history()
+        .await
+        .map_err(ApiError::unavailable)?;
+    Ok(Json(history))
+}
+
+#[derive(Deserialize)]
+struct ReplayQuery {
+    through: Option<u64>,
+}
+
+async fn replay(
+    State(registry): State<IntrospectionRegistry>,
+    Path(name): Path<String>,
+    query: Result<Query<ReplayQuery>, QueryRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let Query(query) = query.map_err(|rejection| ApiError::bad_request(rejection.body_text()))?;
+    let replayed = find(&registry, &name)?
+        .replay(query.through)
+        .await
+        .map_err(ApiError::bad_request)?;
+    Ok(Json(replayed))
 }
 
 fn find(registry: &IntrospectionRegistry, name: &str) -> Result<StoreHandle, ApiError> {
@@ -193,6 +228,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn history_and_replay_reach_the_store() {
+        let app = router(registry());
+        call(app.clone(), post("/dispatch/counter", r#""Increment""#)).await;
+        call(app.clone(), post("/dispatch/counter", r#""Increment""#)).await;
+
+        let (status, body) = call(app.clone(), get("/history/counter")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            body["entries"][1],
+            json!({ "seq": 1, "action": "Increment" })
+        );
+
+        let (status, body) = call(app.clone(), get("/replay/counter")).await;
+        assert_eq!(
+            (status, body),
+            (
+                StatusCode::OK,
+                json!({ "state": { "count": 2 }, "through": null, "matches_current": true })
+            )
+        );
+
+        let (status, body) = call(app.clone(), get("/replay/counter?through=0")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["state"], json!({ "count": 1 }));
+        assert_eq!(body["matches_current"], json!(false));
+
+        let (status, body) = call(app.clone(), get("/replay/counter?through=5")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body, json!({ "error": "entry 5 has not been recorded" }));
+
+        let (status, body) = call(app, get("/replay/counter?through=minus")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(
+            body["error"].as_str().unwrap().contains("through"),
+            "{body}"
+        );
+    }
+
+    #[tokio::test]
     async fn unknown_feature_is_not_found() {
         let app = router(registry());
 
@@ -200,7 +274,13 @@ mod tests {
         assert_eq!(status, StatusCode::NOT_FOUND);
         assert_eq!(body, json!({ "error": "unknown feature `missing`" }));
 
-        let (status, _) = call(app, post("/dispatch/missing", r#""Increment""#)).await;
+        let (status, _) = call(app.clone(), post("/dispatch/missing", r#""Increment""#)).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        let (status, _) = call(app.clone(), get("/history/missing")).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        let (status, _) = call(app, get("/replay/missing")).await;
         assert_eq!(status, StatusCode::NOT_FOUND);
     }
 }

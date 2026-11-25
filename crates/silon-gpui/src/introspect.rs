@@ -6,6 +6,7 @@ use silon_introspect::{IntrospectionCommand, StoreHandle};
 use tokio::sync::mpsc;
 
 use crate::Store;
+use crate::history::{HISTORY_CAPACITY, History};
 
 impl<F: Feature, R: EffectRunner<F>> Store<F, R> {
     /// Returns a handle through which introspection clients read this store's
@@ -14,11 +15,17 @@ impl<F: Feature, R: EffectRunner<F>> Store<F, R> {
     /// Commands are handled on the main thread, so a dispatched action goes
     /// through [`Store::dispatch`] exactly like one sent from the UI. The
     /// handle reports an error once the store is released.
+    ///
+    /// From now on the store records every dispatched action, keeping the
+    /// last [`HISTORY_CAPACITY`] of them for `GetHistory` and `Replay`.
     pub fn attach_introspection(
-        &self,
+        &mut self,
         name: impl Into<String>,
         cx: &mut Context<Self>,
     ) -> StoreHandle {
+        if self.history.is_none() {
+            self.history = Some(History::new(self.state().clone(), HISTORY_CAPACITY));
+        }
         let (tx, mut rx) = mpsc::unbounded_channel();
         cx.spawn(async move |this, cx| {
             while let Some(command) = rx.recv().await {
@@ -55,7 +62,29 @@ impl<F: Feature, R: EffectRunner<F>> Store<F, R> {
                     .send(serde_json::to_value(schema).unwrap_or_default())
                     .ok();
             }
+            IntrospectionCommand::GetHistory { reply } => {
+                let history = self.history.as_ref().map(History::to_json);
+                reply.send(history.unwrap_or_default()).ok();
+            }
+            IntrospectionCommand::Replay { through, reply } => {
+                reply.send(self.replay_json(through)).ok();
+            }
         }
+    }
+
+    fn replay_json(&self, through: Option<u64>) -> Result<serde_json::Value, String> {
+        let history = self
+            .history
+            .as_ref()
+            .ok_or("introspection is not attached")?;
+        let replayed = serde_json::to_value(history.replay(through)?)
+            .map_err(|err| format!("cannot serialize state: {err}"))?;
+        let current = self.state_json()?;
+        Ok(serde_json::json!({
+            "matches_current": replayed == current,
+            "state": replayed,
+            "through": through,
+        }))
     }
 
     fn state_json(&self) -> Result<serde_json::Value, String> {
