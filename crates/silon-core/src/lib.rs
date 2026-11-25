@@ -6,8 +6,10 @@
 //! crate turns them into futures that may produce follow-up actions.
 
 mod harness;
+mod history;
 
 pub use harness::TestHarness;
+pub use history::{History, ReplayError};
 
 use schemars::JsonSchema;
 use serde::{Serialize, de::DeserializeOwned};

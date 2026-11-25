@@ -6,7 +6,7 @@ use silon_introspect::{IntrospectionCommand, StoreHandle};
 use tokio::sync::mpsc;
 
 use crate::Store;
-use crate::history::{HISTORY_CAPACITY, History};
+use crate::history::ActionHistory;
 
 impl<F: Feature, R: EffectRunner<F>> Store<F, R> {
     /// Returns a handle through which introspection clients read this store's
@@ -17,14 +17,14 @@ impl<F: Feature, R: EffectRunner<F>> Store<F, R> {
     /// handle reports an error once the store is released.
     ///
     /// From now on the store records every dispatched action, keeping the
-    /// last [`HISTORY_CAPACITY`] of them for `GetHistory` and `Replay`.
+    /// last [`HISTORY_CAPACITY`](crate::HISTORY_CAPACITY) of them for `GetHistory` and `Replay`.
     pub fn attach_introspection(
         &mut self,
         name: impl Into<String>,
         cx: &mut Context<Self>,
     ) -> StoreHandle {
         if self.history.is_none() {
-            self.history = Some(History::new(self.state().clone(), HISTORY_CAPACITY));
+            self.history = Some(ActionHistory::new(self.state().clone()));
         }
         let (tx, mut rx) = mpsc::unbounded_channel();
         cx.spawn(async move |this, cx| {
@@ -63,7 +63,7 @@ impl<F: Feature, R: EffectRunner<F>> Store<F, R> {
                     .ok();
             }
             IntrospectionCommand::GetHistory { reply } => {
-                let history = self.history.as_ref().map(History::to_json);
+                let history = self.history.as_ref().map(ActionHistory::to_json);
                 reply.send(history.unwrap_or_default()).ok();
             }
             IntrospectionCommand::Replay { through, reply } => {

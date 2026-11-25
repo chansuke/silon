@@ -7,7 +7,7 @@ pub struct Store<F: Feature, R: EffectRunner<F>> {
     runner: R,
     /// Recorded actions, started by `attach_introspection`.
     #[cfg(feature = "introspect")]
-    pub(crate) history: Option<crate::history::History<F>>,
+    pub(crate) history: Option<crate::history::ActionHistory<F>>,
 }
 
 impl<F: Feature, R: EffectRunner<F>> Store<F, R> {
