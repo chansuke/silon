@@ -1,0 +1,19 @@
+[package]
+name = "todo-app"
+description = "GPUI todo-list example built with Silon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+## Serves the todo list on http://127.0.0.1:3737 for agents.
+introspect = ["silon-gpui/introspect", "dep:silon-introspect"]
+
+[dependencies]
+gpui.workspace = true
+silon-core.workspace = true
+silon-gpui.workspace = true
+silon-introspect = { workspace = true, optional = true }
+silon-ui = { workspace = true, features = ["components"] }
+todo-core.workspace = true
