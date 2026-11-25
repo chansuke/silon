@@ -18,6 +18,10 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 publish = false
 
+# Kani sets `cfg(kani)` when it builds the proof harnesses.
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }
+
 [workspace.dependencies]
 silon-core = { path = "crates/silon-core" }
 silon-introspect = { path = "crates/silon-introspect" }

@@ -7,6 +7,8 @@
 
 mod harness;
 mod history;
+#[cfg(kani)]
+mod verification;
 
 pub use harness::TestHarness;
 pub use history::{History, ReplayError};

@@ -79,6 +79,9 @@ impl Feature for TodoFeature {
     }
 }
 
+#[cfg(kani)]
+mod verification;
+
 #[cfg(test)]
 mod tests {
     use super::*;
