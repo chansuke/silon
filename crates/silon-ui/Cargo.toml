@@ -1,0 +1,26 @@
+[package]
+name = "silon-ui"
+description = "Design tokens, stateless primitives and widget adapters for Silon views"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+## Adapters around gpui-component's stateful widgets, such as `TextInput`.
+components = ["dep:gpui-component"]
+
+[dependencies]
+gpui.workspace = true
+gpui-component = { workspace = true, optional = true }
+silon-gpui.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+schemars.workspace = true
+serde.workspace = true
+silon-core.workspace = true
+
+[[test]]
+name = "text_input"
+required-features = ["components"]
