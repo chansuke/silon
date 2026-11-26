@@ -13,10 +13,11 @@ permissions:
 jobs:
   advisories:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
       - name: Check advisories
-        run: nix develop -c cargo deny check advisories
+        run: nix shell --inputs-from . nixpkgs#cargo-deny -c cargo deny --locked check advisories

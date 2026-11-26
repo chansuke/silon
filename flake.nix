@@ -70,6 +70,17 @@
             }
           );
 
+          # Lightweight shell for lint.yml without Rust/Vulkan/rust-analyzer.
+          lint = pkgs.mkShell {
+            packages = with pkgs; [
+              cargo-deny
+              typos
+              actionlint
+              shellcheck
+              nixfmt
+            ];
+          };
+
           # Quint and the Apalache model checker it runs, which need a JDK.
           # Kept out of the default shell: `nix develop .#spec`.
           spec = pkgs.mkShell { packages = [ pkgs.quint ]; };

@@ -6,13 +6,17 @@ on:
     - cron: "0 3 * * 1"
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
 jobs:
   # Every mutant of the listed crates must make a test fail. Each mutant
-  # rebuilds the crate, so the GUI crates, whose logic the pure crates and
-  # the store tests already cover, are left out to keep the run short.
+  # rebuilds its crate, so the GUI/app crates (`silon-ui`, `counter-app`,
+  # `todo-app`) are excluded to keep build cost bounded.
   mutants:
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -27,19 +31,28 @@ jobs:
           # Run cargo and rustc from the dev shell, not the runner's rustup.
           cmd-format: nix develop -c {0}
           save-if: false
-      # A pull request mutates only the lines it changes; the schedule mutates
-      # the listed crates completely.
+      # A pull request mutates only the lines it changes unless it edits
+      # mutation config, manifests, or integration tests (in which case all
+      # listed crates are mutated). Schedules mutate everything.
       - name: Select the mutants
         if: github.event_name == 'pull_request'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          git diff "$BASE_SHA" -- '*.rs' > "$RUNNER_TEMP/changes.diff"
-          echo "MUTANTS_ARGS=--in-diff $RUNNER_TEMP/changes.diff" >> "$GITHUB_ENV"
+          merge_base=$(git merge-base "$BASE_SHA" HEAD)
+          if git diff --name-only "$merge_base" HEAD | grep -Eq '(^\.cargo/mutants\.toml$|(^|/)Cargo\.toml$|(^|/)tests/)'; then
+            echo "Running full mutation suite (config, manifest, or integration tests changed)."
+          else
+            git diff "$merge_base" HEAD -- '*.rs' > "$RUNNER_TEMP/changes.diff"
+            echo "DIFF_FILE=$RUNNER_TEMP/changes.diff" >> "$GITHUB_ENV"
+          fi
       - name: Check that the tests catch each mutant
         run: |
-          # shellcheck disable=SC2086 # MUTANTS_ARGS holds several arguments.
-          nix develop -c cargo mutants --all-features -o "$RUNNER_TEMP" $MUTANTS_ARGS \
+          mutants_args=()
+          if [ -n "${DIFF_FILE:-}" ]; then
+            mutants_args=(--in-diff "$DIFF_FILE")
+          fi
+          nix develop -c cargo mutants --all-features -o "$RUNNER_TEMP" "${mutants_args[@]}" \
             -p silon-core -p counter-core -p todo-core \
             -p silon-introspect -p silon-gpui -p silon-mcp
       - name: Report the mutants the tests missed

@@ -5,72 +5,52 @@ on:
     branches: [main]
   pull_request:
 
-permissions:
-  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions: {}
 
 env:
   KANI_VERSION: 0.68.0
 
 jobs:
-  # Each harness runs in its own job, so that its solver has a runner to itself.
-  list:
+  # All harnesses complete in under a minute total, so running them sequentially
+  # in one job avoids paying the Kani install cost once per harness.
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    outputs:
-      harnesses: ${{ steps.list.outputs.harnesses }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # Kani is not in nixpkgs, and `cargo kani setup` installs the nightly it
-      # needs with rustup, so these jobs use the runner's rustup instead of the
+      # needs with rustup, so this job uses the runner's rustup instead of the
       # Nix dev shell. The crates with harnesses need no system libraries.
-      - name: Install Kani
-        run: |
-          cargo install --locked kani-verifier --version "$KANI_VERSION"
-          cargo kani setup
-      - name: List the proof harnesses
-        id: list
-        run: |
-          harnesses='[]'
-          for crate in crates/silon-core examples/counter/counter-core examples/todo/todo-core; do
-            (cd "$crate" && cargo kani list --format json)
-            harnesses=$(jq -c --arg crate "$crate" --argjson acc "$harnesses" \
-              '$acc + [."standard-harnesses"[][] | {crate: $crate, harness: .}]' "$crate/kani-list.json")
-          done
-          echo "$harnesses" | jq .
-          echo "harnesses=$harnesses" >> "$GITHUB_OUTPUT"
-
-  harness:
-    needs: list
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        target: ${{ fromJSON(needs.list.outputs.harnesses) }}
-    name: harness (${{ matrix.target.harness }})
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
       - name: Install Kani
         run: |
           cargo install --locked kani-verifier --version "$KANI_VERSION"
           cargo kani setup
       # A harness that runs past the timeout fails on its own instead of
       # exhausting the runner.
-      - name: Check the proof harness
-        working-directory: ${{ matrix.target.crate }}
-        env:
-          HARNESS: ${{ matrix.target.harness }}
+      - name: Check the proof harnesses
         run: |
           set -o pipefail
-          cargo kani --output-format terse -Z unstable-options --harness-timeout 10m \
-            --exact --harness "$HARNESS" 2>&1 | tee "$RUNNER_TEMP/kani.log"
-      - name: Report the harness
+          : > "$RUNNER_TEMP/kani.log"
+          for crate in crates/silon-core examples/counter/counter-core examples/todo/todo-core; do
+            echo "::group::$crate"
+            (
+              cd "$crate"
+              cargo kani --output-format terse -Z unstable-options --harness-timeout 5m
+            ) 2>&1 | tee -a "$RUNNER_TEMP/kani.log"
+            echo "::endgroup::"
+          done
+      - name: Report the harnesses
         if: ${{ !cancelled() }}
         run: |
+          [ -f "$RUNNER_TEMP/kani.log" ] || exit 0
           {
             echo "### Kani"
             echo '```'
@@ -79,11 +59,11 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       # Kani passes a harness whose cover properties are unsatisfiable or
       # unreachable. Such a harness checks nothing, so fail it here.
-      - name: Check that the harness satisfies its cover properties
-        if: ${{ !cancelled() }}
+      - name: Check that every harness satisfies its cover properties
+        if: success()
         run: |
           awk '
-            /^Checking harness / { harness = $3; sub(/\.\.\.$/, "", harness); covered[harness] = 0 }
+            /^Checking harness / { harness = $3; sub(/\.\.\.$/, "", harness); covered[harness] = 0; seen++ }
             /\*\* [0-9]+ of [0-9]+ cover properties satisfied/ {
               for (i = 1; i <= NF; i++) if ($i == "of") { satisfied = $(i - 1); total = $(i + 1) }
               covered[harness] = 1
@@ -93,20 +73,13 @@ jobs:
               }
             }
             END {
+              if (seen == 0) {
+                print "::error::no Kani harnesses were checked"
+                exit 1
+              }
               for (harness in covered) if (!covered[harness]) {
                 printf "::error::%s has no cover property\n", harness
                 failed = 1
               }
               exit failed
             }' "$RUNNER_TEMP/kani.log"
-
-  # The check that a pull request requires: every harness passed.
-  verify:
-    needs: harness
-    if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Require every harness to pass
-        env:
-          RESULT: ${{ needs.harness.result }}
-        run: test "$RESULT" = success

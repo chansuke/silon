@@ -88,16 +88,16 @@ impl<S: Clone, E> History<S, E> {
         let Some(entry) = entry else {
             return self.restart_at(current);
         };
-        self.entries.push_back(entry);
-        if self.entries.len() > self.capacity {
-            let folded = match self.entries.pop_front() {
-                Some(oldest) => apply(&mut self.base, &oldest),
-                None => Ok(()),
-            };
-            if folded.is_err() {
-                self.restart_at(current);
-            }
+        if self.capacity == 0 {
+            return self.restart_at(current);
         }
+        if self.entries.len() == self.capacity
+            && let Some(oldest) = self.entries.pop_front()
+            && apply(&mut self.base, &oldest).is_err()
+        {
+            return self.restart_at(current);
+        }
+        self.entries.push_back(entry);
     }
 
     fn restart_at(&mut self, current: &S) {

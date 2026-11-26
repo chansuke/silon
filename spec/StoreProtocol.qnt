@@ -1,5 +1,11 @@
 // The Store protocol of silon-gpui with the counter feature of the examples.
 //
+// Scope: models the Store dispatch loop, out-of-order background effects,
+// store release, and bounded history folding on the Counter feature.
+// Out of scope here (covered by silon-core Kani harnesses and silon-gpui
+// tests): JSON serialization/deserialization failures, `restart_at`, delayed
+// introspection attach, and partial `through` replay.
+//
 // The GPUI main thread applies one action at a time (`dispatch`). Effects run
 // in the background and finish in any order; each follow-up action is
 // dispatched back on the main thread, or dropped once the store is released.
@@ -7,15 +13,14 @@
 // a history of at most CAPACITY entries, folding the oldest into `base`.
 //
 // Checked properties:
-// - replayMatches, historyBounded: under every interleaving, including an
-//   agent that dispatches any action over HTTP, replaying the history from
-//   the base gives the live state. This is what `GET /replay` reports as
-//   `matches_current`.
+// - replayMatches, historyBounded, countInBounds: under every interleaving,
+//   including an agent that dispatches any action over HTTP, replaying the
+//   history from the base gives the live state. This is what `GET /replay`
+//   reports as `matches_current`.
 // - oneAddInFlight: with actions from the UI and from effects only, at most
 //   one delayed add is in flight and `loading` says whether one is.
 //   An agent breaks this by dispatching `AsyncAddCompleted` itself while an
-//   add is in flight; `quint verify --invariant=oneAddInFlight` (with the
-//   default `step`) shows the trace.
+//   add is in flight; `agentBreaksOneAddInFlightTest` demonstrates this trace.
 module StoreProtocol {
   // Bounds of the model. The Rust code saturates at i32::MIN and i32::MAX;
   // small bounds reach saturation within a few steps.
@@ -99,7 +104,7 @@ module StoreProtocol {
     dispatch(RequestAsyncAdd(d)),
   }
 
-  // An agent can send any action over HTTP.
+  // An agent can send any action over HTTP (a strict superset of uiDispatch).
   action agentDispatch = {
     nondet d = DELTAS.oneOf()
     any {
@@ -139,7 +144,10 @@ module StoreProtocol {
     history' = history,
   }
 
+  // Stutter only once the store is released and no effects remain in flight.
   action idle = all {
+    released,
+    inFlight.length() == 0,
     state' = state,
     inFlight' = inFlight,
     released' = released,
@@ -151,7 +159,7 @@ module StoreProtocol {
   action uiStep = any { uiDispatch, effectFinishes, release, idle }
 
   // With an agent.
-  action step = any { uiDispatch, agentDispatch, effectFinishes, release, idle }
+  action step = any { agentDispatch, effectFinishes, release, idle }
 
   val replayMatches = history.foldl(base, (s, a) => applyAction(s, a)) == state
 
@@ -161,4 +169,14 @@ module StoreProtocol {
 
   val oneAddInFlight =
     released or (inFlight.length() <= 1 and state.loading == (inFlight.length() == 1))
+
+  // Deterministic witness that an agent dispatching AsyncAddCompleted while an
+  // effect is in flight breaks oneAddInFlight.
+  run agentBreaksOneAddInFlightTest = {
+    init
+      .then(dispatch(RequestAsyncAdd(1)))
+      .expect(oneAddInFlight)
+      .then(dispatch(AsyncAddCompleted(1)))
+      .expect(not(oneAddInFlight))
+  }
 }
