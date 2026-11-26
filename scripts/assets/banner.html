@@ -1,0 +1,41 @@
+<!doctype html>
+<!-- The banner that generate-assets.sh renders to assets/banner.png. The
+     script copies the fonts and wordmark-dark.svg next to this file. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+@font-face { font-family: "Space Grotesk"; src: url("fonts/SpaceGrotesk.ttf"); font-weight: 300 700; }
+@font-face { font-family: Inter; src: url("fonts/InterVariable.ttf"); font-weight: 100 900; }
+@font-face { font-family: "JetBrains Mono"; src: url("fonts/JetBrainsMono-Regular.ttf"); }
+html, body { margin: 0; background: #0E1116; }
+.banner { width: 1280px; height: 640px; box-sizing: border-box; padding: 88px 96px; color: #F5F6F3; font-family: Inter, sans-serif; display: flex; align-items: center; justify-content: space-between; gap: 64px; }
+.intro { display: flex; flex-direction: column; gap: 32px; max-width: 560px; }
+.intro img { height: 94px; width: auto; align-self: flex-start; }
+.tagline { margin: 0; font-family: "Space Grotesk"; font-weight: 500; font-size: 34px; line-height: 1.25; letter-spacing: -0.01em; }
+.subline { margin: 0; font-size: 20px; line-height: 1.5; color: #A9AFBB; }
+.loop { display: flex; flex-direction: column; gap: 14px; font-family: "JetBrains Mono"; font-size: 20px; min-width: 380px; }
+.box { border: 1px solid #2A2F38; border-radius: 14px; padding: 18px 22px; }
+.box.state { border-color: #8C97FF; color: #8C97FF; }
+.arrow { padding-left: 22px; color: #6C7380; }
+</style>
+</head>
+<body>
+<div class="banner">
+  <div class="intro">
+    <img src="wordmark-dark.svg" alt="Silon">
+    <p class="tagline">Deterministic desktop apps on GPUI, built with The Elm Architecture.</p>
+    <p class="subline">Test the logic without a window. Let agents read the state and dispatch actions.</p>
+  </div>
+  <div class="loop">
+    <div class="box">Action</div>
+    <div class="arrow">↓</div>
+    <div class="box">update(&amp;mut State, Action)</div>
+    <div class="arrow">↓</div>
+    <div class="box state">State, Command&lt;Effect&gt;</div>
+    <div class="arrow">↓</div>
+    <div class="box">View</div>
+  </div>
+</div>
+</body>
+</html>

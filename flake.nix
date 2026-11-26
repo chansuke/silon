@@ -53,6 +53,7 @@
                   # Checks that CI runs (see .github/workflows).
                   cargo-deny
                   cargo-mutants
+                  gitleaks
                   typos
                   actionlint
                   shellcheck
@@ -74,6 +75,7 @@
           lint = pkgs.mkShell {
             packages = with pkgs; [
               cargo-deny
+              gitleaks
               typos
               actionlint
               shellcheck
@@ -84,6 +86,22 @@
           # Quint and the Apalache model checker it runs, which need a JDK.
           # Kept out of the default shell: `nix develop .#spec`.
           spec = pkgs.mkShell { packages = [ pkgs.quint ]; };
+        }
+        # Tools and fonts for scripts/generate-assets.sh. Linux only, as
+        # nixpkgs builds Chromium for Linux only.
+        // lib.optionalAttrs stdenv.hostPlatform.isLinux {
+          assets = pkgs.mkShell {
+            packages = with pkgs; [
+              (python3.withPackages (p: [
+                p.fonttools
+                p.uharfbuzz
+              ]))
+              chromium
+              curl
+            ];
+            INTER_FONT = "${pkgs.inter}/share/fonts/truetype/InterVariable.ttf";
+            JETBRAINS_MONO_FONT = "${pkgs.jetbrains-mono}/share/fonts/truetype/JetBrainsMono-Regular.ttf";
+          };
         }
       );
 

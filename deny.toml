@@ -8,7 +8,8 @@ unmaintained = "workspace"
 ignore = []
 
 [licenses]
-# Licenses compatible with distributing Silon under MIT OR Apache-2.0.
+# Dependency licenses that let Silon (0BSD) and apps built on it be
+# distributed without opening their source.
 # MPL-2.0 is copyleft only at the file level, so it does not extend to
 # Silon's own code.
 allow = [
