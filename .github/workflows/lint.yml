@@ -21,9 +21,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # gitleaks scans every commit, not just the checked out tree.
+          fetch-depth: 0
       - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
       - name: Check licenses, advisories, bans and sources of dependencies
         run: nix develop .#lint -c cargo deny --locked check
+      - name: Scan for committed secrets
+        run: nix develop .#lint -c gitleaks git --redact --no-banner .
       - name: Check spelling
         run: nix develop .#lint -c typos
       # actionlint also runs shellcheck on each `run:` script.

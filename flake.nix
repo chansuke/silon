@@ -53,6 +53,7 @@
                   # Checks that CI runs (see .github/workflows).
                   cargo-deny
                   cargo-mutants
+                  gitleaks
                   typos
                   actionlint
                   shellcheck
@@ -74,6 +75,7 @@
           lint = pkgs.mkShell {
             packages = with pkgs; [
               cargo-deny
+              gitleaks
               typos
               actionlint
               shellcheck
