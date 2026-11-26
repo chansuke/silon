@@ -1,4 +1,6 @@
-# Silon
+<p align="center">
+  <img src="assets/banner.png" alt="Silon: deterministic desktop apps on GPUI, built with The Elm Architecture" width="800">
+</p>
 
 A deterministic desktop application framework on top of
 [GPUI](https://www.gpui.rs/), using The Elm Architecture. Business logic is a
