@@ -1,0 +1,35 @@
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # Checks of everything but the Rust code itself, which ci.yml lints.
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
+      - name: Check licenses, advisories, bans and sources of dependencies
+        run: nix develop .#lint -c cargo deny --locked check
+      - name: Check spelling
+        run: nix develop .#lint -c typos
+      # actionlint also runs shellcheck on each `run:` script.
+      - name: Lint workflows
+        run: nix develop .#lint -c actionlint
+      - name: Lint shell scripts
+        run: nix develop .#lint -c shellcheck scripts/*.sh
+      - name: Check Nix formatting
+        run: nix develop .#lint -c nixfmt --check flake.nix

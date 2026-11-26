@@ -63,6 +63,9 @@ impl Feature for CounterFeature {
     }
 }
 
+#[cfg(kani)]
+mod verification;
+
 #[cfg(test)]
 mod tests {
     use super::*;

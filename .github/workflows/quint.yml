@@ -1,0 +1,47 @@
+name: Quint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # Checks spec/StoreProtocol.qnt with deterministic witness tests, the random
+  # simulator, and Apalache (which checks every behavior up to --max-steps).
+  spec:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: spec
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
+      - name: Typecheck
+        run: nix develop ..#spec -c quint typecheck StoreProtocol.qnt
+      # Deterministic witness: an agent dispatching AsyncAddCompleted while an
+      # effect is in flight breaks oneAddInFlight.
+      - name: Run specification tests
+        run: nix develop ..#spec -c quint test StoreProtocol.qnt
+      # A fixed seed keeps the simulation the same on every run.
+      - name: Simulate
+        run: |
+          nix develop ..#spec -c quint run --seed=0x5110 --max-samples=10000 --max-steps=20 \
+            --invariant="replayMatches and historyBounded and countInBounds" StoreProtocol.qnt
+          nix develop ..#spec -c quint run --seed=0x5110 --max-samples=10000 --max-steps=20 \
+            --step=uiStep --invariant=oneAddInFlight StoreProtocol.qnt
+      - name: Check every behavior up to the bound
+        run: |
+          nix develop ..#spec -c quint verify --max-steps=5 \
+            --invariant="replayMatches and historyBounded and countInBounds" StoreProtocol.qnt
+          nix develop ..#spec -c quint verify --max-steps=6 \
+            --step=uiStep --invariant=oneAddInFlight StoreProtocol.qnt

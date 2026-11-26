@@ -33,7 +33,7 @@ pub enum TodoAction {
     /// The input text changed.
     DraftChanged(String),
     /// Adds the trimmed draft as an item and clears the draft. Blank drafts
-    /// are ignored.
+    /// are ignored, and so is every draft once item ids run out.
     Submit,
     /// Flips `done` of the item with this id.
     Toggle(u64),
@@ -55,13 +55,15 @@ impl Feature for TodoFeature {
             TodoAction::DraftChanged(text) => state.draft = text,
             TodoAction::Submit => {
                 let title = state.draft.trim();
-                if !title.is_empty() {
+                // Once ids run out, which takes 2^64 submits, the draft stays.
+                let next_id = state.next_id.checked_add(1);
+                if let (false, Some(next_id)) = (title.is_empty(), next_id) {
                     state.items.push(TodoItem {
                         id: state.next_id,
                         title: title.to_owned(),
                         done: false,
                     });
-                    state.next_id += 1;
+                    state.next_id = next_id;
                     state.draft.clear();
                 }
             }
@@ -76,6 +78,9 @@ impl Feature for TodoFeature {
         Command::none()
     }
 }
+
+#[cfg(kani)]
+mod verification;
 
 #[cfg(test)]
 mod tests {
@@ -127,6 +132,21 @@ mod tests {
             }
         );
         assert!(h.emitted_effects.is_empty());
+    }
+
+    #[test]
+    fn submit_keeps_the_draft_once_ids_run_out() {
+        let full = TodoState {
+            draft: "one more".into(),
+            items: vec![item(u64::MAX - 1, "last", false)],
+            next_id: u64::MAX,
+        };
+        let mut harness = TestHarness::<TodoFeature>::new(full.clone());
+
+        harness.send(TodoAction::Submit);
+
+        assert_eq!(harness.state, full);
+        assert!(harness.take_effects().is_empty());
     }
 
     #[test]

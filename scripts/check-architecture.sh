@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Checks the boundaries from AGENTS.md: pure crates link neither gpui nor
-# tokio, silon-introspect links no gpui, silon-ui links no silon-introspect,
+# tokio, silon-introspect links no gpui, silon-gpui without `introspect` links
+# neither silon-introspect nor axum, silon-ui links no silon-introspect,
 # silon-mcp links neither gpui nor other Silon crates (it only speaks HTTP),
 # an app built without the `introspect` feature links no axum, no app links
-# rmcp, and app views take colors from silon-ui tokens instead of raw color
-# literals.
+# rmcp, app views take colors from silon-ui tokens instead of raw color
+# literals, and app screens use FeatureView + FeatureRoot instead of manual
+# gpui::Render impls.
 set -euo pipefail
 
 status=0
@@ -24,12 +26,13 @@ forbid() {
   fi
 }
 
-forbid silon-core 'gpui|tokio'
-forbid counter-core 'gpui|tokio'
-forbid todo-core 'gpui|tokio'
-forbid silon-introspect 'gpui'
+forbid silon-core 'gpui|tokio' --all-features
+forbid counter-core 'gpui|tokio' --all-features
+forbid todo-core 'gpui|tokio' --all-features
+forbid silon-introspect 'gpui' --all-features
+forbid silon-gpui 'silon-introspect|axum'
 forbid silon-ui 'silon-introspect' --all-features
-forbid silon-mcp 'gpui|silon-core|silon-gpui|silon-introspect|silon-ui'
+forbid silon-mcp 'gpui|silon-core|silon-gpui|silon-introspect|silon-ui' --all-features
 forbid counter-app 'axum'
 forbid todo-app 'axum'
 forbid counter-app 'rmcp' --all-features
@@ -42,6 +45,15 @@ if [[ -n $raw_colors ]]; then
   status=1
 else
   echo "ok: app sources use no raw colors"
+fi
+
+manual_render=$(grep -rnE 'impl.*Render\b.*for' examples/*/*-app/src || true)
+if [[ -n $manual_render ]]; then
+  echo "error: app sources implement Render manually; use FeatureView + FeatureRoot instead:" >&2
+  while read -r line; do echo "  $line" >&2; done <<<"$manual_render"
+  status=1
+else
+  echo "ok: app sources have no manual Render impls"
 fi
 
 exit "$status"

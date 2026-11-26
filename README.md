@@ -24,6 +24,19 @@ Mesa's software renderer:
 export VK_DRIVER_FILES=$(nix build --no-link --print-out-paths nixpkgs#mesa)/share/vulkan/icd.d/lvp_icd.x86_64.json
 ```
 
+## Verification
+
+Besides the tests and the checks from `AGENTS.md`, CI runs:
+
+| Workflow | What it checks | Run it locally |
+| --- | --- | --- |
+| `lint.yml` | dependency licenses and advisories, spelling, workflows, shell scripts, Nix formatting | `cargo deny --locked check`, `typos`, `actionlint`, `shellcheck scripts/*.sh`, `nixfmt --check flake.nix` |
+| `kani.yml` | proofs over all inputs within bounds: `History` replay/folding/restarts, the counter and todo `update` | `cargo kani` in `crates/silon-core`, `examples/*/*-core` (Kani 0.68, outside the dev shell) |
+| `quint.yml` | `spec/StoreProtocol.qnt`: the store, effects finishing in any order, agents and the history | `nix develop .#spec`, then the commands in `quint.yml` |
+| `mutants.yml` | every mutant of the logic crates makes a test fail (changed lines on pull requests, everything weekly) | `cargo mutants -p silon-core` |
+| `zizmor.yml` | workflow security | `nix shell --inputs-from . nixpkgs#zizmor -c zizmor .` |
+| `advisories.yml` | new advisories, daily | `cargo deny --locked check advisories` |
+
 ## Crates
 
 - `silon-core`: `Feature`, `Command`, `EffectRunner`, `TestHarness`. No GPUI, no IO.

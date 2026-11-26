@@ -1,0 +1,10 @@
+# cargo-mutants settings, used by .github/workflows/mutants.yml.
+
+# Kani proof harnesses are built only under `cfg(kani)` and checked by
+# kani.yml; `cargo test` never runs them.
+exclude_globs = ["**/verification.rs"]
+
+exclude_re = [
+    # `Command::default()` is `Command::None`, so this mutant is equivalent.
+    'replace Command<E>::none -> Self with Default::default\(\)',
+]

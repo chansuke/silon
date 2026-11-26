@@ -41,15 +41,24 @@
             {
               nativeBuildInputs = [ pkgs.pkg-config ];
               buildInputs = lib.optionals stdenv.hostPlatform.isLinux (linuxRuntimeLibs pkgs);
-              packages = with pkgs; [
-                cargo
-                rustc
-                clippy
-                rustfmt
-                rust-analyzer
-                curl
-              ]
-              ++ lib.optionals stdenv.hostPlatform.isLinux [ mold ];
+              packages =
+                with pkgs;
+                [
+                  cargo
+                  rustc
+                  clippy
+                  rustfmt
+                  rust-analyzer
+                  curl
+                  # Checks that CI runs (see .github/workflows).
+                  cargo-deny
+                  cargo-mutants
+                  typos
+                  actionlint
+                  shellcheck
+                  nixfmt
+                ]
+                ++ lib.optionals stdenv.hostPlatform.isLinux [ mold ];
             }
             // lib.optionalAttrs stdenv.hostPlatform.isLinux {
               LD_LIBRARY_PATH = lib.makeLibraryPath (linuxRuntimeLibs pkgs);
@@ -60,6 +69,21 @@
               RUSTFLAGS = "-C link-arg=-fuse-ld=mold";
             }
           );
+
+          # Lightweight shell for lint.yml without Rust/Vulkan/rust-analyzer.
+          lint = pkgs.mkShell {
+            packages = with pkgs; [
+              cargo-deny
+              typos
+              actionlint
+              shellcheck
+              nixfmt
+            ];
+          };
+
+          # Quint and the Apalache model checker it runs, which need a JDK.
+          # Kept out of the default shell: `nix develop .#spec`.
+          spec = pkgs.mkShell { packages = [ pkgs.quint ]; };
         }
       );
 

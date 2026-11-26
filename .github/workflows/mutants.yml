@@ -1,0 +1,71 @@
+name: Mutants
+
+on:
+  pull_request:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # Every mutant of the listed crates must make a test fail. Each mutant
+  # rebuilds its crate, so the GUI/app crates (`silon-ui`, `counter-app`,
+  # `todo-app`) are excluded to keep build cost bounded.
+  mutants:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          # Run cargo and rustc from the dev shell, not the runner's rustup.
+          cmd-format: nix develop -c {0}
+          save-if: false
+      # A pull request mutates only the lines it changes unless it edits
+      # mutation config, manifests, or integration tests (in which case all
+      # listed crates are mutated). Schedules mutate everything.
+      - name: Select the mutants
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          merge_base=$(git merge-base "$BASE_SHA" HEAD)
+          if git diff --name-only "$merge_base" HEAD | grep -Eq '(^\.cargo/mutants\.toml$|(^|/)Cargo\.toml$|(^|/)tests/)'; then
+            echo "Running full mutation suite (config, manifest, or integration tests changed)."
+          else
+            git diff "$merge_base" HEAD -- '*.rs' > "$RUNNER_TEMP/changes.diff"
+            echo "DIFF_FILE=$RUNNER_TEMP/changes.diff" >> "$GITHUB_ENV"
+          fi
+      - name: Check that the tests catch each mutant
+        run: |
+          mutants_args=()
+          if [ -n "${DIFF_FILE:-}" ]; then
+            mutants_args=(--in-diff "$DIFF_FILE")
+          fi
+          nix develop -c cargo mutants --all-features -o "$RUNNER_TEMP" "${mutants_args[@]}" \
+            -p silon-core -p counter-core -p todo-core \
+            -p silon-introspect -p silon-gpui -p silon-mcp
+      - name: Report the mutants the tests missed
+        if: ${{ !cancelled() }}
+        run: |
+          out="$RUNNER_TEMP/mutants.out"
+          [ -d "$out" ] || exit 0
+          {
+            echo "### Mutants"
+            echo "Caught $(wc -l < "$out/caught.txt"), missed $(wc -l < "$out/missed.txt"), timed out $(wc -l < "$out/timeout.txt"), unviable $(wc -l < "$out/unviable.txt")."
+            if [ -s "$out/missed.txt" ]; then
+              echo '```'
+              cat "$out/missed.txt"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

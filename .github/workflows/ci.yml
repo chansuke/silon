@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -12,6 +16,9 @@ jobs:
   # The checks from AGENTS.md section 6, in the order it gives.
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PROPTEST_CASES: 2000
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -24,19 +31,24 @@ jobs:
           # Pull requests restore the cache that main saves.
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Test the pure crates
-        run: nix develop -c cargo test --locked -p silon-core -p counter-core
-      - name: Typecheck
-        run: |
-          nix develop -c cargo check --locked --workspace --all-targets
-          nix develop -c cargo check --locked --workspace --all-features
+        run: nix develop -c cargo test --locked -p silon-core -p counter-core -p todo-core
       - name: Run clippy
         run: |
           nix develop -c cargo clippy --locked --workspace --all-targets -- -D warnings
           nix develop -c cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       - name: Check formatting
         run: nix develop -c cargo fmt --all --check
+      # Broken intra-doc links and malformed doc comments fail here.
+      - name: Check documentation
+        run: nix develop -c cargo doc --locked --workspace --all-features --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
       - name: Check crate boundaries
         run: nix develop -c scripts/check-architecture.sh
+      # Exercise silon-gpui and silon-ui without optional features (`introspect`,
+      # `components`) at runtime, not just compile time.
+      - name: Test default features
+        run: nix develop -c cargo test --locked -p silon-gpui -p silon-ui
       # GPUI's test platform needs no window, so the store wiring and the
       # introspection server are tested here as well.
       - name: Test the workspace
