@@ -2,6 +2,10 @@
   <img src="assets/banner.png" alt="Silon: deterministic desktop apps on GPUI, built with The Elm Architecture" width="800">
 </p>
 
+[![CI](https://img.shields.io/github/actions/workflow/status/chansuke/silon/ci.yml?branch=main&label=CI&labelColor=3A3F48)](https://github.com/chansuke/silon/actions/workflows/ci.yml)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-3B4CE0?labelColor=3A3F48)](#license)
+[![Pull requests: not accepted](https://img.shields.io/badge/pull%20requests-not%20accepted-5B616E?labelColor=3A3F48)](CONTRIBUTING.md)
+
 A deterministic desktop application framework on top of
 [GPUI](https://www.gpui.rs/), using The Elm Architecture. Business logic is a
 pure `update` function that tests run without a window, and a running app can
@@ -9,11 +13,13 @@ expose its state and actions to coding agents over HTTP or MCP.
 
 ## Crates
 
-- `silon-core`: `Feature`, `Command`, `EffectRunner`, `TestHarness`. No GPUI, no IO.
-- `silon-gpui`: `Store`, `Dispatcher`, `FeatureView`, `FeatureRoot`.
-- `silon-introspect`: the HTTP API, behind the `introspect` feature of `silon-gpui`.
-- `silon-mcp`: an MCP server over stdio that forwards to the HTTP API.
-- `silon-ui`: theme tokens and primitives. The `components` feature adds `TextInput`.
+| Crate | What it holds |
+| --- | --- |
+| `silon-core` | `Feature`, `Command`, `EffectRunner`, `TestHarness`. No GPUI, no IO. |
+| `silon-gpui` | `Store`, `Dispatcher`, `FeatureView`, `FeatureRoot`. |
+| `silon-introspect` | The HTTP API, behind the `introspect` feature of `silon-gpui`. |
+| `silon-mcp` | An MCP server over stdio that forwards to the HTTP API. |
+| `silon-ui` | Theme tokens and primitives. The `components` feature adds `TextInput`. |
 
 The architecture rules are in [AGENTS.md](AGENTS.md).
 
