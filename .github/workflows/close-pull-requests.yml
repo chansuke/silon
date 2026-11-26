@@ -1,0 +1,29 @@
+name: Close pull requests
+
+# Silon does not accept pull requests (see CONTRIBUTING.md). This closes pull
+# requests from anyone but the owner and Dependabot.
+on:
+  # pull_request_target gets a token that can close pull requests from forks.
+  # The job never checks out or runs code from the pull request.
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
+    types: [opened, reopened]
+
+permissions: {}
+
+jobs:
+  close:
+    if: >-
+      github.event.pull_request.author_association != 'OWNER' &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Close the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr close "$NUMBER" --comment "Thank you for your interest. Silon does not accept pull requests, so this one is closed automatically. Please open an issue instead. See CONTRIBUTING.md."
