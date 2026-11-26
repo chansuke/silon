@@ -32,7 +32,7 @@ todo-core = { path = "examples/todo/todo-core" }
 
 gpui = "0.2.2"
 # 0.5.1 is the last release built on crates.io gpui 0.2; 0.6+ uses the gpui-pre fork.
-gpui-component = "=0.5.1"
+gpui-component = "=0.10.0"
 schemars = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
