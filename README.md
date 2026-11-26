@@ -3,7 +3,7 @@
 </p>
 
 [![CI](https://img.shields.io/github/actions/workflow/status/chansuke/silon/ci.yml?branch=main&label=CI&labelColor=3A3F48)](https://github.com/chansuke/silon/actions/workflows/ci.yml)
-[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-3B4CE0?labelColor=3A3F48)](#license)
+[![License: 0BSD](https://img.shields.io/badge/license-0BSD-3B4CE0?labelColor=3A3F48)](#license)
 [![Pull requests: not accepted](https://img.shields.io/badge/pull%20requests-not%20accepted-5B616E?labelColor=3A3F48)](CONTRIBUTING.md)
 
 A deterministic desktop application framework on top of
@@ -60,5 +60,5 @@ Silon does not accept pull requests. Bug reports are welcome as issues. See
 
 ## License
 
-Licensed under either of [Apache-2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT) at
-your option.
+[0BSD](LICENSE). You can use, copy, modify and distribute Silon without
+attribution.
