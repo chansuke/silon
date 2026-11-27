@@ -1,0 +1,38 @@
+name: Bug report
+description: Something in Silon does not work as expected.
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Commands or a small Feature that shows the problem.
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Silon commit
+      description: Output of `git rev-parse HEAD`, or the rev in your Cargo.lock.
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: OS and GPU
+      description: For example "NixOS 25.11, AMD Radeon 780M, Mesa 25.2".
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Error output or a backtrace (`RUST_BACKTRACE=1`).
+      render: text
