@@ -29,6 +29,7 @@ impl Feature for Note {
     type State = NoteState;
     type Action = NoteAction;
     type Effect = std::convert::Infallible;
+    type Subscription = std::convert::Infallible;
 
     fn update(state: &mut NoteState, action: NoteAction) -> Command<Self::Effect> {
         state.log.push(format!("{action:?}"));
@@ -58,7 +59,7 @@ impl FeatureView<Note> for NoteView {
 type NoteStore = Store<Note, NoEffects>;
 
 fn open(cx: &mut TestAppContext) -> (Entity<NoteStore>, &mut VisualTestContext) {
-    let store = cx.new(|_| NoteStore::new(NoteState::default(), NoEffects));
+    let store = cx.new(|cx| NoteStore::new(NoteState::default(), NoEffects, cx));
     let window = cx.update(|cx| {
         silon_ui::init(cx);
         components::init(cx);

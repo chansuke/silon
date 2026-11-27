@@ -25,6 +25,11 @@ impl<F: Feature> TestHarness<F> {
     pub fn take_effects(&mut self) -> Vec<F::Effect> {
         std::mem::take(&mut self.emitted_effects)
     }
+
+    /// The subscriptions a store would run in the current state.
+    pub fn subscriptions(&self) -> Vec<F::Subscription> {
+        F::subscriptions(&self.state)
+    }
 }
 
 #[cfg(test)]
@@ -46,6 +51,7 @@ mod tests {
         type State = Vec<u8>;
         type Action = EchoAction;
         type Effect = u8;
+        type Subscription = u8;
 
         fn update(state: &mut Vec<u8>, action: EchoAction) -> Command<u8> {
             match action {
@@ -58,6 +64,14 @@ mod tests {
                     Command::batch([Command::perform(n), Command::perform(n)])
                 }
             }
+        }
+
+        /// One subscription per distinct value pushed so far.
+        fn subscriptions(state: &Vec<u8>) -> Vec<u8> {
+            let mut subs = state.clone();
+            subs.sort_unstable();
+            subs.dedup();
+            subs
         }
     }
 
@@ -80,5 +94,17 @@ mod tests {
         assert_eq!(harness.take_effects(), vec![7]);
         assert!(harness.emitted_effects.is_empty());
         assert_eq!(harness.state, vec![7]);
+    }
+
+    #[test]
+    fn subscriptions_follow_the_current_state() {
+        let mut harness = TestHarness::<Echo>::new(Vec::new());
+        assert!(harness.subscriptions().is_empty());
+
+        harness
+            .send(EchoAction::Push(3))
+            .send(EchoAction::PushTwice(1));
+
+        assert_eq!(harness.subscriptions(), vec![1, 3]);
     }
 }

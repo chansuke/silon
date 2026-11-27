@@ -4,6 +4,8 @@
 //! `Action -> update -> (State, Command<Effect>) -> View`.
 //! Effects are plain data; an [`EffectRunner`] living in the application
 //! crate turns them into futures that may produce follow-up actions.
+//! Subscriptions are plain data too: [`Feature::subscriptions`] says which
+//! streams of actions should run for a state, and the runner opens them.
 
 mod harness;
 mod history;
@@ -13,14 +15,19 @@ mod verification;
 pub use harness::TestHarness;
 pub use history::{History, ReplayError};
 
+use futures_core::Stream;
 use schemars::JsonSchema;
 use serde::{Serialize, de::DeserializeOwned};
 use std::fmt::Debug;
 use std::future::Future;
+use std::hash::Hash;
 use std::pin::Pin;
 
 /// A boxed, sendable future.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
+/// A boxed, sendable stream.
+pub type BoxStream<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + 'a>>;
 
 /// Side effects requested by [`Feature::update`], described as data.
 #[derive(Debug, Default)]
@@ -69,23 +76,45 @@ pub trait Feature: 'static {
     type State: Clone + Debug + Serialize + DeserializeOwned + 'static;
     type Action: Debug + Serialize + DeserializeOwned + JsonSchema + Send + 'static;
     type Effect: Debug + Send + 'static;
+    /// A stream of actions the feature listens to, described as data. Two
+    /// equal values are the same stream.
+    type Subscription: Debug + Clone + Eq + Hash + Send + 'static;
 
     /// Applies `action` to `state`. Must be pure and deterministic.
     fn update(state: &mut Self::State, action: Self::Action) -> Command<Self::Effect>;
+
+    /// The subscriptions that should run while the feature is in `state`.
+    /// Must be pure and deterministic, like [`update`](Self::update).
+    fn subscriptions(_state: &Self::State) -> Vec<Self::Subscription> {
+        Vec::new()
+    }
 }
 
-/// Executes the effects of a [`Feature`], optionally yielding a follow-up action.
+/// Executes the effects of a [`Feature`], optionally yielding a follow-up
+/// action, and opens the streams behind its subscriptions.
 pub trait EffectRunner<F: Feature>: 'static {
     fn run(&self, effect: F::Effect) -> BoxFuture<'static, Option<F::Action>>;
+
+    /// Opens the stream of actions for `subscription`. The store polls it
+    /// until the state stops asking for `subscription` and drops it then.
+    /// A stream that ends is not reopened while the state still asks for it.
+    fn subscribe(&self, subscription: F::Subscription) -> BoxStream<'static, F::Action>;
 }
 
-/// The runner for features without effects, i.e. whose `Effect` is
-/// [`Infallible`](std::convert::Infallible).
+/// The runner for features without effects or subscriptions, i.e. whose
+/// `Effect` and `Subscription` are [`Infallible`](std::convert::Infallible).
 pub struct NoEffects;
 
-impl<F: Feature<Effect = std::convert::Infallible>> EffectRunner<F> for NoEffects {
+impl<F> EffectRunner<F> for NoEffects
+where
+    F: Feature<Effect = std::convert::Infallible, Subscription = std::convert::Infallible>,
+{
     fn run(&self, effect: std::convert::Infallible) -> BoxFuture<'static, Option<F::Action>> {
         match effect {}
+    }
+
+    fn subscribe(&self, subscription: std::convert::Infallible) -> BoxStream<'static, F::Action> {
+        match subscription {}
     }
 }
 

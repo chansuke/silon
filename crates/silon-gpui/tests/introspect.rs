@@ -4,7 +4,7 @@ use gpui::{AppContext, TestAppContext};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use silon_core::{BoxFuture, Command, EffectRunner, Feature};
+use silon_core::{BoxFuture, BoxStream, Command, EffectRunner, Feature};
 use silon_gpui::Store;
 
 struct Toggle;
@@ -23,6 +23,7 @@ impl Feature for Toggle {
     type State = ToggleState;
     type Action = ToggleAction;
     type Effect = ();
+    type Subscription = std::convert::Infallible;
 
     fn update(state: &mut ToggleState, ToggleAction::Flip: ToggleAction) -> Command<()> {
         state.on = !state.on;
@@ -36,11 +37,18 @@ impl EffectRunner<Toggle> for NoEffects {
     fn run(&self, (): ()) -> BoxFuture<'static, Option<ToggleAction>> {
         Box::pin(async { None })
     }
+
+    fn subscribe(
+        &self,
+        subscription: std::convert::Infallible,
+    ) -> BoxStream<'static, ToggleAction> {
+        match subscription {}
+    }
 }
 
 #[gpui::test]
 fn handle_reads_dispatches_and_describes_the_store(cx: &mut TestAppContext) {
-    let store = cx.new(|_| Store::<Toggle, NoEffects>::new(ToggleState::default(), NoEffects));
+    let store = cx.new(|cx| Store::<Toggle, NoEffects>::new(ToggleState::default(), NoEffects, cx));
     let handle = store.update(cx, |store, cx| store.attach_introspection("toggle", cx));
     assert_eq!(handle.name(), "toggle");
 
@@ -78,6 +86,7 @@ impl Feature for Sum {
     type State = i64;
     type Action = SumAction;
     type Effect = i64;
+    type Subscription = std::convert::Infallible;
 
     fn update(total: &mut i64, action: SumAction) -> Command<i64> {
         match action {
@@ -96,11 +105,15 @@ impl EffectRunner<Sum> for AddRunner {
     fn run(&self, n: i64) -> BoxFuture<'static, Option<SumAction>> {
         Box::pin(async move { Some(SumAction::Add(n)) })
     }
+
+    fn subscribe(&self, subscription: std::convert::Infallible) -> BoxStream<'static, SumAction> {
+        match subscription {}
+    }
 }
 
 #[gpui::test]
 fn history_records_ui_effect_and_handle_actions_from_attach(cx: &mut TestAppContext) {
-    let store = cx.new(|_| Store::<Sum, AddRunner>::new(0, AddRunner));
+    let store = cx.new(|cx| Store::<Sum, AddRunner>::new(0, AddRunner, cx));
     // Dispatched before attach, so part of the base rather than the history.
     store.update(cx, |store, cx| store.dispatch(SumAction::Add(100), cx));
     let handle = store.update(cx, |store, cx| store.attach_introspection("sum", cx));
@@ -145,7 +158,7 @@ fn history_records_ui_effect_and_handle_actions_from_attach(cx: &mut TestAppCont
 
 #[gpui::test]
 fn history_keeps_the_last_capacity_actions(cx: &mut TestAppContext) {
-    let store = cx.new(|_| Store::<Sum, AddRunner>::new(0, AddRunner));
+    let store = cx.new(|cx| Store::<Sum, AddRunner>::new(0, AddRunner, cx));
     let handle = store.update(cx, |store, cx| store.attach_introspection("sum", cx));
     let extra = 3;
     for n in 1..=(silon_gpui::HISTORY_CAPACITY as i64 + extra) {

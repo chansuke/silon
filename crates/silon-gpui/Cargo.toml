@@ -14,6 +14,7 @@ workspace = true
 introspect = ["dep:silon-introspect", "dep:schemars", "dep:serde_json", "dep:tokio"]
 
 [dependencies]
+futures.workspace = true
 gpui.workspace = true
 silon-core.workspace = true
 schemars = { workspace = true, optional = true }

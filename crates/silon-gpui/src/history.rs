@@ -70,6 +70,7 @@ mod tests {
         type State = String;
         type Action = Push;
         type Effect = ();
+        type Subscription = std::convert::Infallible;
 
         fn update(state: &mut String, Push(digit): Push) -> Command<()> {
             state.push(char::from(b'0' + digit));

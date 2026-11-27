@@ -1,7 +1,8 @@
+use std::convert::Infallible;
 use std::time::Duration;
 
 use counter_core::{CounterAction, CounterEffect, CounterFeature};
-use silon_core::{BoxFuture, EffectRunner};
+use silon_core::{BoxFuture, BoxStream, EffectRunner};
 
 /// Executes counter effects with real timers.
 pub struct CounterEffectRunner;
@@ -14,6 +15,10 @@ impl EffectRunner<CounterFeature> for CounterEffectRunner {
                 Some(CounterAction::AsyncAddCompleted(delta))
             }),
         }
+    }
+
+    fn subscribe(&self, subscription: Infallible) -> BoxStream<'static, CounterAction> {
+        match subscription {}
     }
 }
 

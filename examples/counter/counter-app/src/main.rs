@@ -13,7 +13,8 @@ type CounterStore = Store<CounterFeature, CounterEffectRunner>;
 fn main() {
     Application::new().run(|cx: &mut App| {
         silon_ui::init(cx);
-        let store = cx.new(|_| CounterStore::new(CounterState::default(), CounterEffectRunner));
+        let store =
+            cx.new(|cx| CounterStore::new(CounterState::default(), CounterEffectRunner, cx));
 
         #[cfg(feature = "introspect")]
         start_introspection(&store, cx);
