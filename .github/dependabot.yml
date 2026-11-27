@@ -19,3 +19,7 @@ updates:
       cargo:
         patterns: ["*"]
         update-types: [minor, patch]
+    ignore:
+      # 0.6 and later build on the gpui-pre fork instead of crates.io gpui.
+      - dependency-name: gpui-component
+        versions: [">=0.6.0"]
