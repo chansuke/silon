@@ -70,6 +70,9 @@ fn rendering_does_not_copy_the_state(cx: &mut TestAppContext) {
         cx.run_until_parked();
     }
 
-    assert!(RENDERS.load(Ordering::SeqCst) >= 4, "the view did not re-render");
+    assert!(
+        RENDERS.load(Ordering::SeqCst) >= 4,
+        "the view did not re-render"
+    );
     assert_eq!(CLONES.load(Ordering::SeqCst), 0);
 }

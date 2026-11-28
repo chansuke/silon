@@ -48,7 +48,8 @@ impl<F: Feature, R: EffectRunner<F>, V: FeatureView<F>> Render for FeatureRoot<F
         // without a copy of the state. The view cannot reach the store, so
         // nothing re-enters it during the call.
         let dispatcher = self.dispatcher.clone();
-        self.store
-            .update(cx, |store, cx| V::view(store.state(), dispatcher, window, cx))
+        self.store.update(cx, |store, cx| {
+            V::view(store.state(), dispatcher, window, cx)
+        })
     }
 }
