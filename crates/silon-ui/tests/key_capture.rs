@@ -20,6 +20,7 @@ enum Pressed {
         ctrl: bool,
     },
     Paste(String),
+    Copy,
 }
 
 impl Feature for Keys {
@@ -35,6 +36,7 @@ impl Feature for Keys {
                 format!("{ctrl}{key} {text:?}")
             }
             Pressed::Paste(text) => format!("paste {text:?}"),
+            Pressed::Copy => "copy".into(),
         });
         Command::none()
     }
@@ -56,6 +58,7 @@ impl FeatureView<Keys> for KeysView {
                 ctrl: press.ctrl,
             }))
             .on_paste(dispatcher.map(Pressed::Paste))
+            .on_copy(dispatcher.map(|()| Pressed::Copy))
             .child(Text::new("type here"))
     }
 }
@@ -121,6 +124,51 @@ fn the_paste_shortcut_dispatches_the_clipboard_text(cx: &mut TestAppContext) {
         vec![r#"paste "ls -l""#, r#"paste "ls -l""#]
     };
     assert_eq!(log(&store, cx), expected);
+}
+
+#[gpui::test]
+fn the_copy_shortcut_dispatches_a_copy_instead_of_the_key(cx: &mut TestAppContext) {
+    let (store, cx) = open(cx);
+
+    cx.simulate_click(point(px(20.), px(10.)), Modifiers::none());
+    let copy = if cfg!(target_os = "macos") {
+        "cmd-c"
+    } else {
+        "ctrl-shift-c"
+    };
+    cx.simulate_keystrokes(copy);
+    cx.simulate_keystrokes("ctrl-c");
+    cx.run_until_parked();
+
+    assert_eq!(log(&store, cx), ["copy", "ctrl-c None"]);
+}
+
+#[test]
+fn only_the_platform_shortcut_is_a_copy() {
+    let press = |key: &str, ctrl, shift, platform| KeyPress {
+        key: key.into(),
+        ctrl,
+        shift,
+        platform,
+        ..KeyPress::default()
+    };
+    assert!(
+        !press("c", true, false, false).is_copy(),
+        "ctrl-c interrupts"
+    );
+    let ctrl_alt_shift_c = KeyPress {
+        alt: true,
+        ..press("c", true, true, false)
+    };
+    assert!(!ctrl_alt_shift_c.is_copy());
+    if cfg!(target_os = "macos") {
+        assert!(press("c", false, false, true).is_copy());
+    } else {
+        assert!(press("c", true, true, false).is_copy());
+        assert!(press("C", true, true, false).is_copy());
+        assert!(press("insert", true, false, false).is_copy());
+        assert!(!press("insert", true, true, false).is_copy());
+    }
 }
 
 #[test]
