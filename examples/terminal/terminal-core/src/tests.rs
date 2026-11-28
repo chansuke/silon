@@ -259,3 +259,138 @@ fn the_wheel_scrolls_the_active_session() {
 
     assert_eq!(h.take_effects(), [input(0, Input::Scroll(-3))]);
 }
+
+fn at(row: u16, col: u16) -> Point {
+    Point { row, col }
+}
+
+fn painted(id: u32, lines: &[&str]) -> TermAction {
+    TermAction::Painted {
+        id,
+        screen: Screen {
+            lines: lines
+                .iter()
+                .map(|line| {
+                    vec![Span {
+                        text: (*line).into(),
+                        ..Span::default()
+                    }]
+                })
+                .collect(),
+            ..Screen::default()
+        },
+    }
+}
+
+fn selection(h: &TestHarness<Terminal>, id: u32) -> Option<Selection> {
+    h.state.session(id).unwrap().selection
+}
+
+#[test]
+fn dragging_selects_from_the_press_to_the_pointer_and_copy_takes_that_text() {
+    let mut h = harness();
+    h.send(TermAction::NewSession)
+        .send(painted(0, &["$ echo 日本", "日本  ", "$ "]));
+    h.take_effects();
+
+    h.send(TermAction::SelectFrom(at(1, 1)))
+        .send(TermAction::SelectTo(at(0, 7)));
+    assert_eq!(
+        selection(&h, 0),
+        Some(Selection {
+            anchor: at(1, 1),
+            head: at(0, 7),
+        })
+    );
+    h.send(TermAction::Copy);
+
+    assert_eq!(h.take_effects(), [TermEffect::Copy("日本\n日".into())]);
+}
+
+#[test]
+fn copying_whole_lines_drops_trailing_blanks_and_stops_at_the_last_line() {
+    let mut h = harness();
+    h.send(TermAction::NewSession)
+        .send(painted(0, &["ab  ", "", "cd"]));
+    h.take_effects();
+
+    h.send(TermAction::SelectFrom(at(0, 0)))
+        .send(TermAction::SelectTo(at(5, 99)))
+        .send(TermAction::Copy);
+
+    assert_eq!(h.take_effects(), [TermEffect::Copy("ab\n\ncd".into())]);
+}
+
+#[test]
+fn a_click_without_a_drag_selects_nothing_to_copy() {
+    let mut h = harness();
+    h.send(TermAction::NewSession).send(painted(0, &["ab"]));
+    h.take_effects();
+
+    h.send(TermAction::SelectTo(at(0, 2)));
+    assert_eq!(selection(&h, 0), None, "a drag needs a press first");
+
+    h.send(TermAction::SelectFrom(at(0, 1)))
+        .send(TermAction::Copy);
+    assert!(h.take_effects().is_empty());
+
+    h.send(TermAction::SelectTo(at(0, 2)))
+        .send(TermAction::SelectFrom(at(0, 0)))
+        .send(TermAction::Copy);
+    assert!(h.take_effects().is_empty(), "a new press starts over");
+}
+
+#[test]
+fn typing_scrolling_and_resizing_drop_the_selection() {
+    let mut h = harness();
+    h.send(TermAction::NewSession).send(painted(0, &["ab"]));
+    let select = |h: &mut TestHarness<Terminal>| {
+        h.send(TermAction::SelectFrom(at(0, 0)))
+            .send(TermAction::SelectTo(at(0, 2)));
+        assert!(selection(h, 0).is_some());
+    };
+
+    for action in [
+        TermAction::Key(key("a")),
+        TermAction::Text("x".into()),
+        TermAction::Paste("y".into()),
+        TermAction::Scroll(-1),
+        TermAction::Resized(Size { cols: 20, rows: 5 }),
+    ] {
+        select(&mut h);
+        h.send(action.clone());
+        assert_eq!(selection(&h, 0), None, "{action:?}");
+    }
+
+    select(&mut h);
+    h.send(painted(0, &["abc"])).send(TermAction::Scroll(0));
+    assert!(selection(&h, 0).is_some(), "new output keeps it");
+}
+
+#[test]
+fn a_selection_belongs_to_the_session_it_was_made_in() {
+    let mut h = harness();
+    h.send(TermAction::NewSession)
+        .send(painted(0, &["first"]))
+        .send(TermAction::SelectFrom(at(0, 0)))
+        .send(TermAction::SelectTo(at(0, 5)))
+        .send(TermAction::NewSession)
+        .send(painted(1, &["second"]));
+    h.take_effects();
+
+    h.send(TermAction::Copy);
+    assert!(h.take_effects().is_empty());
+
+    h.send(TermAction::Activate(0)).send(TermAction::Copy);
+    assert_eq!(h.take_effects(), [TermEffect::Copy("first".into())]);
+}
+
+#[test]
+fn selecting_without_a_session_does_nothing() {
+    let mut h = harness();
+    h.send(TermAction::SelectFrom(at(0, 0)))
+        .send(TermAction::SelectTo(at(0, 1)))
+        .send(TermAction::Copy);
+
+    assert!(h.take_effects().is_empty());
+}
