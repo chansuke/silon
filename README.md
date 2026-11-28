@@ -32,7 +32,8 @@ cargo run -p counter-app --features introspect   # HTTP API on 127.0.0.1:3737
 ```
 
 `herdboard-app` shows the terminals of a running
-[herdr-core](https://github.com/herdrdev/herdr-core) and sends text to them.
+[herdr-core](https://github.com/herdrdev/herdr-core). Click a live terminal's
+screen to type into it.
 Pass the socket path as the first argument, or it uses `HC_SOCKET` or the default
 path of the `HC_SESSION` session.
 
