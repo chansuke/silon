@@ -1,6 +1,6 @@
 use std::sync::LazyLock;
 
-use gpui::{App, Global, Hsla, Pixels, px, rgb};
+use gpui::{App, Global, Hsla, Pixels, SharedString, px, rgb};
 
 /// Semantic colors. Views refer to roles, never to concrete colors.
 #[derive(Clone, Debug)]
@@ -58,6 +58,8 @@ pub struct Theme {
     pub text_body: Pixels,
     pub text_title: Pixels,
     pub text_display: Pixels,
+    /// Font family for monospaced text, such as a terminal screen.
+    pub font_mono: SharedString,
 }
 
 impl Global for Theme {}
@@ -138,6 +140,13 @@ impl Theme {
             text_body: px(14.),
             text_title: px(20.),
             text_display: px(32.),
+            font_mono: if cfg!(target_os = "macos") {
+                "Menlo".into()
+            } else if cfg!(target_os = "windows") {
+                "Consolas".into()
+            } else {
+                "DejaVu Sans Mono".into()
+            },
         }
     }
 }
