@@ -133,6 +133,13 @@ impl Engine {
         Ok(bytes)
     }
 
+    /// The bytes for typed `text`: the text itself. Typing brings the view
+    /// back to the latest output.
+    pub fn text(&mut self, text: &str) -> Vec<u8> {
+        self.terminal.scroll_viewport(ScrollViewport::Bottom);
+        text.as_bytes().to_vec()
+    }
+
     /// The bytes for pasting `text`: bracketed when the program asked for
     /// it, with control bytes made harmless.
     pub fn paste(&mut self, text: &str) -> Result<Vec<u8>, Error> {

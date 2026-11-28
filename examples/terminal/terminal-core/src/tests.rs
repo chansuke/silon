@@ -100,6 +100,8 @@ fn keys_and_pastes_go_to_the_active_session() {
     h.take_effects();
 
     h.send(TermAction::Key(key("a")))
+        .send(TermAction::Text("日本".into()))
+        .send(TermAction::Text(String::new()))
         .send(TermAction::Paste("ls\n".into()))
         .send(TermAction::Paste(String::new()));
 
@@ -107,6 +109,7 @@ fn keys_and_pastes_go_to_the_active_session() {
         h.take_effects(),
         [
             input(0, Input::Key(key("a"))),
+            input(0, Input::Text("日本".into())),
             input(0, Input::Paste("ls\n".into())),
         ]
     );

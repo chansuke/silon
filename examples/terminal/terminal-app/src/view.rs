@@ -131,6 +131,7 @@ fn screen(state: &TermState, dispatcher: &Dispatcher<TermAction>) -> KeyCapture 
         .grow()
         .autofocus()
         .on_key(dispatcher.map(key))
+        .on_text(dispatcher.map(TermAction::Text))
         .on_paste(dispatcher.map(TermAction::Paste));
     if state.sessions.is_empty() {
         return capture

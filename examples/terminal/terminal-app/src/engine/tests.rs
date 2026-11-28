@@ -234,3 +234,13 @@ fn full_screen_programs_get_arrow_keys_for_scrolling() {
     assert_eq!(e.scroll(-1).unwrap(), b"\x1bOA");
     assert!(!e.screen().unwrap().scrolled_back);
 }
+
+#[test]
+fn typed_text_goes_as_it_is_and_returns_to_the_bottom() {
+    let mut e = engine(10, 3);
+    lines_of(&mut e, 10);
+    e.scroll(-3).unwrap();
+
+    assert_eq!(e.text("日本語\n"), "日本語\n".as_bytes());
+    assert!(!e.screen().unwrap().scrolled_back);
+}

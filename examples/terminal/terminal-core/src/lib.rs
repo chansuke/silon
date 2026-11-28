@@ -183,6 +183,8 @@ pub enum TermAction {
     Resized(Size),
     /// A key pressed in the active session.
     Key(Key),
+    /// Text typed into the active session, as an input method committed it.
+    Text(String),
     /// Text pasted into the active session.
     Paste(String),
     /// Scrolls the active session by this many lines, up when negative.
@@ -214,6 +216,8 @@ pub enum TermAction {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Input {
     Key(Key),
+    /// Typed text, sent as it is.
+    Text(String),
     Paste(String),
     Resize(Size),
     /// Lines to scroll, up when negative: through history, or as arrow
@@ -290,6 +294,11 @@ impl Feature for Terminal {
             TermAction::Scroll(lines) => {
                 if lines != 0 {
                     return state.type_into_active(Input::Scroll(lines));
+                }
+            }
+            TermAction::Text(text) => {
+                if !text.is_empty() {
+                    return state.type_into_active(Input::Text(text));
                 }
             }
             TermAction::Paste(text) => {

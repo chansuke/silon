@@ -240,6 +240,7 @@ impl Session {
     fn apply(&self, running: &mut Running, input: Input) -> io::Result<bool> {
         let bytes = match input {
             Input::Key(key) => running.engine.key(&key).map_err(io_error)?,
+            Input::Text(text) => running.engine.text(&text),
             Input::Paste(text) => running.engine.paste(&text).map_err(io_error)?,
             Input::Resize(size) => {
                 running.engine.resize(size).map_err(io_error)?;
