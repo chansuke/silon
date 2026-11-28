@@ -1,10 +1,10 @@
 use gpui::{App, ElementId, IntoElement, ParentElement, Window};
 use silon_gpui::{Dispatcher, FeatureView};
 use silon_ui::{
-    Align, Badge, Button, ButtonVariant, GridSize, KeyCapture, KeyPress, Panel, Rgb, Row, Space,
-    Span, Stack, Text, TextGrid, TextSize, Tone,
+    Align, Badge, Button, ButtonVariant, GridPoint, GridPointer, GridSize, KeyCapture, KeyPress,
+    Panel, Rgb, Row, Space, Span, Stack, Text, TextGrid, TextSize, Tone,
 };
-use terminal_core::{Key, Screen, Session, Size, TermAction, TermState, Terminal};
+use terminal_core::{Key, Point, Screen, Session, Size, TermAction, TermState, Terminal};
 
 pub struct TermView;
 
@@ -112,6 +112,28 @@ fn key(press: KeyPress) -> TermAction {
     })
 }
 
+fn grid_point(Point { row, col }: Point) -> GridPoint {
+    GridPoint {
+        row: usize::from(row),
+        col: usize::from(col),
+    }
+}
+
+fn screen_point(GridPoint { row, col }: GridPoint) -> Point {
+    let clamp = |n: usize| u16::try_from(n).unwrap_or(u16::MAX);
+    Point {
+        row: clamp(row),
+        col: clamp(col),
+    }
+}
+
+fn pointer(pointer: GridPointer) -> TermAction {
+    match pointer {
+        GridPointer::Press(at) => TermAction::SelectFrom(screen_point(at)),
+        GridPointer::Drag(at) => TermAction::SelectTo(screen_point(at)),
+    }
+}
+
 fn screen(state: &TermState, dispatcher: &Dispatcher<TermAction>) -> KeyCapture {
     let mut grid = TextGrid::new(
         state
@@ -123,16 +145,21 @@ fn screen(state: &TermState, dispatcher: &Dispatcher<TermAction>) -> KeyCapture 
         (state.size.cols, state.size.rows),
         dispatcher.map(|(cols, rows): GridSize| TermAction::Resized(Size { cols, rows })),
     )
-    .on_scroll("screen-scroll", dispatcher.map(TermAction::Scroll));
+    .on_scroll("screen-scroll", dispatcher.map(TermAction::Scroll))
+    .on_pointer(dispatcher.map(pointer));
     if let Some((row, col)) = state.active_session().and_then(|s| s.screen.cursor) {
         grid = grid.cursor(usize::from(row), usize::from(col));
+    }
+    if let Some(selection) = state.active_session().and_then(|s| s.selection) {
+        grid = grid.selection(grid_point(selection.anchor), grid_point(selection.head));
     }
     let capture = KeyCapture::new("screen")
         .grow()
         .autofocus()
         .on_key(dispatcher.map(key))
         .on_text(dispatcher.map(TermAction::Text))
-        .on_paste(dispatcher.map(TermAction::Paste));
+        .on_paste(dispatcher.map(TermAction::Paste))
+        .on_copy(dispatcher.map(|()| TermAction::Copy));
     if state.sessions.is_empty() {
         return capture
             .child(Text::new("No sessions. Start one with New session.").tone(Tone::Muted));

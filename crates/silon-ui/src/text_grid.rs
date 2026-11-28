@@ -1,7 +1,10 @@
+use std::ops::Range;
+
 use gpui::{
     App, Bounds, ElementId, FontStyle, FontWeight, Hsla, InteractiveElement, IntoElement,
-    ParentElement, Pixels, RenderOnce, Rgba, ScrollDelta, ScrollWheelEvent, Styled, StyledText,
-    TextRun, UnderlineStyle, Window, canvas, div, font, prelude::FluentBuilder, px,
+    MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement, Pixels, Point, RenderOnce, Rgba,
+    ScrollDelta, ScrollWheelEvent, SharedString, Styled, StyledText, TextLayout, TextRun,
+    UnderlineStyle, Window, canvas, div, font, prelude::FluentBuilder, px,
 };
 use silon_gpui::Dispatcher;
 
@@ -48,10 +51,29 @@ pub struct TextGrid {
     cursor: Option<(usize, usize)>,
     fit: Option<Fit>,
     scroll: Option<(ElementId, Dispatcher<i32>)>,
+    selection: Option<(GridPoint, GridPoint)>,
+    on_pointer: Option<Dispatcher<GridPointer>>,
 }
 
 /// Columns and rows of a grid.
 pub type GridSize = (u16, u16);
+
+/// A place between characters: before the character at `col` on `row`,
+/// both zero-based.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct GridPoint {
+    pub row: usize,
+    pub col: usize,
+}
+
+/// The left mouse button over the grid.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GridPointer {
+    /// Pressed here.
+    Press(GridPoint),
+    /// Moved here while held.
+    Drag(GridPoint),
+}
 
 struct Fit {
     current: GridSize,
@@ -96,7 +118,23 @@ impl TextGrid {
             cursor: None,
             fit: None,
             scroll: None,
+            selection: None,
+            on_pointer: None,
         }
+    }
+
+    /// Highlights the characters between `from` and `to`, in either order.
+    pub fn selection(mut self, from: GridPoint, to: GridPoint) -> Self {
+        self.selection = Some((from.min(to), from.max(to)));
+        self
+    }
+
+    /// Dispatches where the left mouse button is pressed and dragged, at
+    /// the nearest place between characters. A wide character counts as
+    /// one, as it does for the cursor.
+    pub fn on_pointer(mut self, on_pointer: Dispatcher<GridPointer>) -> Self {
+        self.on_pointer = Some(on_pointer);
+        self
     }
 
     /// Dispatches whole lines scrolled with the wheel or touchpad, up when
@@ -123,78 +161,117 @@ impl TextGrid {
     }
 }
 
-/// Where the cursor cell gets drawn: its text and its default colors.
-#[derive(Clone, Copy)]
-struct CursorColors {
-    fg: Hsla,
-    bg: Hsla,
+/// How a piece of a line is drawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Mark {
+    Plain,
+    Selected,
+    Cursor,
 }
 
-/// Splits `line` so the character at `col` is a span of its own, padding
-/// with spaces when the line is shorter, and returns that span's index.
-fn isolate(line: &[Span], col: usize) -> (Vec<Span>, usize) {
-    let mut out = Vec::with_capacity(line.len() + 2);
-    let mut start = 0;
-    let mut found = None;
-    for span in line {
-        let len = span.text.chars().count();
-        if found.is_none() && col < start + len {
-            let at = col - start;
-            let mut chars = span.text.chars();
-            let before: String = chars.by_ref().take(at).collect();
-            let cell: String = chars.by_ref().take(1).collect();
-            let after: String = chars.collect();
-            for (text, is_cell) in [(before, false), (cell, true), (after, false)] {
-                if text.is_empty() {
-                    continue;
-                }
-                if is_cell {
-                    found = Some(out.len());
-                }
-                out.push(Span {
-                    text,
-                    ..span.clone()
-                });
-            }
+/// Splits `line` into pieces that each draw one way: the cursor cell at
+/// `cursor`, the characters in `selected`, and the rest. A cursor past the
+/// end pads the line with spaces.
+fn mark(line: &[Span], cursor: Option<usize>, selected: Range<usize>) -> Vec<(Span, Mark)> {
+    let mark_of = |col: usize| {
+        if cursor == Some(col) {
+            Mark::Cursor
+        } else if selected.contains(&col) {
+            Mark::Selected
         } else {
-            out.push(span.clone());
+            Mark::Plain
         }
-        start += len;
-    }
-    let index = found.unwrap_or_else(|| {
-        let pad = col - start;
-        if pad > 0 {
-            out.push(Span {
-                text: " ".repeat(pad),
-                ..Span::default()
-            });
-        }
-        out.push(Span {
-            text: " ".into(),
-            ..Span::default()
-        });
-        out.len() - 1
+    };
+    let len: usize = line.iter().map(|span| span.text.chars().count()).sum();
+    let pad = cursor.filter(|&col| col >= len).map(|col| Span {
+        text: " ".repeat(col + 1 - len),
+        ..Span::default()
     });
-    (out, index)
+    let mut out = Vec::with_capacity(line.len() + 2);
+    let mut col = 0;
+    for span in line.iter().chain(pad.as_ref()) {
+        let mut piece = String::new();
+        let mut piece_mark = mark_of(col);
+        for ch in span.text.chars() {
+            let here = mark_of(col);
+            if here != piece_mark && !piece.is_empty() {
+                let text = std::mem::take(&mut piece);
+                out.push((
+                    Span {
+                        text,
+                        ..span.clone()
+                    },
+                    piece_mark,
+                ));
+            }
+            piece_mark = here;
+            piece.push(ch);
+            col += 1;
+        }
+        if !piece.is_empty() {
+            out.push((
+                Span {
+                    text: piece,
+                    ..span.clone()
+                },
+                piece_mark,
+            ));
+        }
+    }
+    out
+}
+
+/// The columns of `row` that `selection` covers.
+fn selected_in(selection: Option<(GridPoint, GridPoint)>, row: usize) -> Range<usize> {
+    match selection {
+        Some((from, to)) if (from.row..=to.row).contains(&row) => {
+            let start = if row == from.row { from.col } else { 0 };
+            let end = if row == to.row { to.col } else { usize::MAX };
+            start..end
+        }
+        _ => 0..0,
+    }
+}
+
+/// The colors each mark draws with, besides the span's own.
+#[derive(Clone, Copy)]
+struct Palette {
+    text: Hsla,
+    cursor_fg: Hsla,
+    cursor_bg: Hsla,
+    selection: Hsla,
+}
+
+/// The place between characters nearest to `position`, in a line laid
+/// out from `content`.
+fn boundary(layout: &TextLayout, content: &str, position: Point<Pixels>) -> usize {
+    let index = layout
+        .index_for_position(position)
+        .unwrap_or_else(|nearest| nearest)
+        .min(content.len());
+    let next = content[index..]
+        .chars()
+        .next()
+        .map_or(index, |ch| index + ch.len_utf8());
+    let past_middle = match (
+        layout.position_for_index(index),
+        layout.position_for_index(next),
+    ) {
+        (Some(start), Some(end)) => position.x > (start.x + end.x) / 2.,
+        _ => false,
+    };
+    let at = if past_middle { next } else { index };
+    content[..at].chars().count()
 }
 
 fn render_line(
-    spans: &[Span],
-    cursor: Option<usize>,
-    family: &gpui::SharedString,
-    text: Hsla,
-    cursor_colors: CursorColors,
-) -> StyledText {
-    let (spans, cursor_index) = match cursor {
-        Some(col) => {
-            let (spans, index) = isolate(spans, col);
-            (spans, Some(index))
-        }
-        None => (spans.to_vec(), None),
-    };
+    pieces: &[(Span, Mark)],
+    family: &SharedString,
+    palette: Palette,
+) -> (SharedString, Vec<TextRun>) {
     let mut content = String::new();
-    let mut runs = Vec::with_capacity(spans.len());
-    for (i, span) in spans.iter().enumerate() {
+    let mut runs = Vec::with_capacity(pieces.len());
+    for (span, mark) in pieces {
         content.push_str(&span.text);
         let mut run_font = font(family.clone());
         if span.bold {
@@ -203,10 +280,11 @@ fn render_line(
         if span.italic {
             run_font.style = FontStyle::Italic;
         }
-        let (color, background) = if cursor_index == Some(i) {
-            (cursor_colors.fg, Some(cursor_colors.bg))
-        } else {
-            (span.fg.map_or(text, Hsla::from), span.bg.map(Hsla::from))
+        let fg = span.fg.map_or(palette.text, Hsla::from);
+        let (color, background) = match mark {
+            Mark::Cursor => (palette.cursor_fg, Some(palette.cursor_bg)),
+            Mark::Selected => (fg, Some(palette.selection)),
+            Mark::Plain => (fg, span.bg.map(Hsla::from)),
         };
         runs.push(TextRun {
             len: span.text.len(),
@@ -227,13 +305,13 @@ fn render_line(
         runs.push(TextRun {
             len: 1,
             font: font(family.clone()),
-            color: text,
+            color: palette.text,
             background_color: None,
             underline: None,
             strikethrough: None,
         });
     }
-    StyledText::new(content).with_runs(runs)
+    (content.into(), runs)
 }
 
 impl RenderOnce for TextGrid {
@@ -246,11 +324,14 @@ impl RenderOnce for TextGrid {
         let family = theme.font_mono.clone();
         let size = theme.text_body;
         let line_height = px((f32::from(size) * LINE_HEIGHT).round());
-        let text = theme.colors.text;
-        let cursor_colors = CursorColors {
-            fg: theme.colors.background,
-            bg: theme.colors.accent,
+        let palette = Palette {
+            text: theme.colors.text,
+            cursor_fg: theme.colors.background,
+            cursor_bg: theme.colors.accent,
+            selection: theme.colors.selection,
         };
+        let selection = self.selection;
+        let on_pointer = self.on_pointer;
         let measure = self.fit.map(|Fit { current, on_fit }| {
             let family = family.clone();
             canvas(
@@ -291,13 +372,33 @@ impl RenderOnce for TextGrid {
             })
             .children(self.lines.iter().enumerate().map(|(row, spans)| {
                 let col = self.cursor.and_then(|(r, c)| (r == row).then_some(c));
-                div().h(line_height).whitespace_nowrap().child(render_line(
-                    spans,
-                    col,
-                    &family,
-                    text,
-                    cursor_colors,
-                ))
+                let pieces = mark(spans, col, selected_in(selection, row));
+                let (content, runs) = render_line(&pieces, &family, palette);
+                let text = StyledText::new(content.clone()).with_runs(runs);
+                let layout = text.layout().clone();
+                div()
+                    .h(line_height)
+                    .whitespace_nowrap()
+                    .when_some(on_pointer.clone(), |d, on_pointer| {
+                        let point = move |position| GridPoint {
+                            row,
+                            col: boundary(&layout, &content, position),
+                        };
+                        let on_press = on_pointer.clone();
+                        let press_at = point.clone();
+                        d.on_mouse_down(MouseButton::Left, move |event: &MouseDownEvent, _, cx| {
+                            on_press.dispatch(GridPointer::Press(press_at(event.position)), cx);
+                        })
+                        .on_mouse_move(
+                            move |event: &MouseMoveEvent, _, cx| {
+                                if event.pressed_button == Some(MouseButton::Left) {
+                                    on_pointer
+                                        .dispatch(GridPointer::Drag(point(event.position)), cx);
+                                }
+                            },
+                        )
+                    })
+                    .child(text)
             }))
     }
 }
@@ -313,8 +414,16 @@ mod tests {
         }
     }
 
-    fn texts(spans: &[Span]) -> Vec<&str> {
-        spans.iter().map(|s| s.text.as_str()).collect()
+    fn texts(pieces: &[(Span, Mark)]) -> Vec<&str> {
+        pieces.iter().map(|(s, _)| s.text.as_str()).collect()
+    }
+
+    /// The cursor cell becomes a piece of its own; returns the pieces and
+    /// the cursor's index among them.
+    fn isolate(line: &[Span], col: usize) -> (Vec<(Span, Mark)>, usize) {
+        let pieces = mark(line, Some(col), 0..0);
+        let index = pieces.iter().position(|(_, m)| *m == Mark::Cursor).unwrap();
+        (pieces, index)
     }
 
     #[test]
@@ -323,38 +432,74 @@ mod tests {
             bold: true,
             ..span("cd")
         };
-        let (spans, index) = isolate(&[span("ab"), bold.clone(), span("ef")], 3);
+        let (pieces, index) = isolate(&[span("ab"), bold.clone(), span("ef")], 3);
 
-        assert_eq!(texts(&spans), ["ab", "c", "d", "ef"]);
+        assert_eq!(texts(&pieces), ["ab", "c", "d", "ef"]);
         assert_eq!(index, 2);
-        assert!(spans[1].bold && spans[2].bold);
+        assert!(pieces[1].0.bold && pieces[2].0.bold);
     }
 
     #[test]
     fn a_cursor_at_the_start_or_end_of_a_span_splits_once() {
-        let (spans, index) = isolate(&[span("ab"), span("cd")], 2);
-        assert_eq!((texts(&spans), index), (vec!["ab", "c", "d"], 1));
+        let (pieces, index) = isolate(&[span("ab"), span("cd")], 2);
+        assert_eq!((texts(&pieces), index), (vec!["ab", "c", "d"], 1));
 
-        let (spans, index) = isolate(&[span("ab")], 1);
-        assert_eq!((texts(&spans), index), (vec!["a", "b"], 1));
+        let (pieces, index) = isolate(&[span("ab")], 1);
+        assert_eq!((texts(&pieces), index), (vec!["a", "b"], 1));
     }
 
     #[test]
     fn a_cursor_past_the_end_pads_the_line() {
-        let (spans, index) = isolate(&[span("ab")], 4);
-        assert_eq!((texts(&spans), index), (vec!["ab", "  ", " "], 2));
+        let (pieces, index) = isolate(&[span("ab")], 4);
+        assert_eq!((texts(&pieces), index), (vec!["ab", "  ", " "], 2));
 
-        let (spans, index) = isolate(&[span("ab")], 2);
-        assert_eq!((texts(&spans), index), (vec!["ab", " "], 1));
+        let (pieces, index) = isolate(&[span("ab")], 2);
+        assert_eq!((texts(&pieces), index), (vec!["ab", " "], 1));
 
-        let (spans, index) = isolate(&[], 0);
-        assert_eq!((texts(&spans), index), (vec![" "], 0));
+        let (pieces, index) = isolate(&[], 0);
+        assert_eq!((texts(&pieces), index), (vec![" "], 0));
     }
 
     #[test]
     fn characters_count_as_one_column_each() {
-        let (spans, index) = isolate(&[span("日本語")], 1);
-        assert_eq!((texts(&spans), index), (vec!["日", "本", "語"], 1));
+        let (pieces, index) = isolate(&[span("日本語")], 1);
+        assert_eq!((texts(&pieces), index), (vec!["日", "本", "語"], 1));
+    }
+
+    #[test]
+    fn a_selection_splits_spans_and_gives_way_to_the_cursor() {
+        let marks = |pieces: &[(Span, Mark)]| pieces.iter().map(|(_, m)| *m).collect::<Vec<_>>();
+
+        let pieces = mark(&[span("abc"), span("def")], None, 1..4);
+        assert_eq!(texts(&pieces), ["a", "bc", "d", "ef"]);
+        assert_eq!(
+            marks(&pieces),
+            [Mark::Plain, Mark::Selected, Mark::Selected, Mark::Plain]
+        );
+
+        let pieces = mark(&[span("abcd")], Some(2), 0..usize::MAX);
+        assert_eq!(texts(&pieces), ["ab", "c", "d"]);
+        assert_eq!(
+            marks(&pieces),
+            [Mark::Selected, Mark::Cursor, Mark::Selected]
+        );
+
+        let pieces = mark(&[span("ab")], None, 0..0);
+        assert_eq!(marks(&pieces), [Mark::Plain]);
+    }
+
+    #[test]
+    fn a_selection_covers_whole_rows_between_its_ends() {
+        let at = |row, col| GridPoint { row, col };
+        let selection = Some((at(1, 3), at(3, 2)));
+
+        assert_eq!(selected_in(selection, 0), 0..0);
+        assert_eq!(selected_in(selection, 1), 3..usize::MAX);
+        assert_eq!(selected_in(selection, 2), 0..usize::MAX);
+        assert_eq!(selected_in(selection, 3), 0..2);
+        assert_eq!(selected_in(selection, 4), 0..0);
+        assert_eq!(selected_in(Some((at(2, 1), at(2, 4))), 2), 1..4);
+        assert_eq!(selected_in(None, 0), 0..0);
     }
 
     #[test]

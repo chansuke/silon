@@ -2,13 +2,23 @@ use std::collections::{HashMap, HashSet};
 
 use futures::StreamExt;
 use futures::channel::mpsc;
-use gpui::{Context, Task};
+use gpui::{App, Context, Task};
 use silon_core::{EffectRunner, Feature};
+
+/// Runs an effect that needs the app on the main thread, or hands it back
+/// with `Err` for the runner.
+type AppEffects<F> = Box<
+    dyn FnMut(
+        <F as Feature>::Effect,
+        &mut App,
+    ) -> Result<Option<<F as Feature>::Action>, <F as Feature>::Effect>,
+>;
 
 /// Owns a feature's state and is the only place where it changes.
 pub struct Store<F: Feature, R: EffectRunner<F>> {
     state: F::State,
     runner: R,
+    on_app: Option<AppEffects<F>>,
     /// The running subscriptions. Dropping an entry's task stops its stream.
     subscriptions: HashMap<F::Subscription, Task<()>>,
     /// Recorded actions, started by `attach_introspection`.
@@ -22,12 +32,25 @@ impl<F: Feature, R: EffectRunner<F>> Store<F, R> {
         let mut store = Self {
             state: initial_state,
             runner,
+            on_app: None,
             subscriptions: HashMap::new(),
             #[cfg(feature = "introspect")]
             history: None,
         };
         store.reconcile_subscriptions(cx);
         store
+    }
+
+    /// Offers each effect to `run` on the main thread first, for effects
+    /// that need the app, such as writing to the clipboard. `run` returns
+    /// the follow-up action, or the effect itself with `Err` to leave it to
+    /// the runner. A follow-up is dispatched later, as it is for the runner.
+    pub fn on_app(
+        mut self,
+        run: impl FnMut(F::Effect, &mut App) -> Result<Option<F::Action>, F::Effect> + 'static,
+    ) -> Self {
+        self.on_app = Some(Box::new(run));
+        self
     }
 
     pub fn state(&self) -> &F::State {
@@ -60,16 +83,33 @@ impl<F: Feature, R: EffectRunner<F>> Store<F, R> {
         self.reconcile_subscriptions(cx);
 
         for effect in effects {
-            let future = self.runner.run(effect);
-            let task = cx.background_executor().spawn(future);
-            cx.spawn(async move |this, cx| {
-                if let Some(next) = task.await {
-                    // The store may be gone (e.g. window closed); nothing to do then.
-                    this.update(cx, |store, cx| store.dispatch(next, cx)).ok();
-                }
-            })
-            .detach();
+            let effect = match &mut self.on_app {
+                Some(on_app) => match on_app(effect, cx) {
+                    Ok(next) => {
+                        Self::dispatch_later(async { next }, cx);
+                        continue;
+                    }
+                    Err(effect) => effect,
+                },
+                None => effect,
+            };
+            let task = cx.background_executor().spawn(self.runner.run(effect));
+            Self::dispatch_later(task, cx);
         }
+    }
+
+    /// Dispatches the action `next` resolves to, if any, on the main thread.
+    fn dispatch_later(
+        next: impl std::future::Future<Output = Option<F::Action>> + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        cx.spawn(async move |this, cx| {
+            if let Some(next) = next.await {
+                // The store may be gone (e.g. window closed); nothing to do then.
+                this.update(cx, |store, cx| store.dispatch(next, cx)).ok();
+            }
+        })
+        .detach();
     }
 
     /// Stops the subscriptions the state no longer asks for and starts the

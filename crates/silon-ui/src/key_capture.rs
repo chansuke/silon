@@ -35,6 +35,11 @@ impl KeyPress {
         printable && !self.ctrl && !self.alt && !self.platform
     }
 
+    /// Whether exactly these of Ctrl and Shift are held, without Alt.
+    fn with(&self, ctrl: bool, shift: bool) -> bool {
+        self.ctrl == ctrl && self.shift == shift && !self.alt
+    }
+
     /// The platform's paste shortcut: Cmd-V on macOS, Ctrl-Shift-V or
     /// Shift-Insert elsewhere.
     pub fn is_paste(&self) -> bool {
@@ -42,8 +47,18 @@ impl KeyPress {
         if cfg!(target_os = "macos") {
             self.platform && v && !self.ctrl && !self.alt
         } else {
-            (self.ctrl && self.shift && v && !self.alt)
-                || (self.shift && self.key == "insert" && !self.ctrl && !self.alt)
+            (self.with(true, true) && v) || (self.with(false, true) && self.key == "insert")
+        }
+    }
+
+    /// The platform's copy shortcut: Cmd-C on macOS, Ctrl-Shift-C or
+    /// Ctrl-Insert elsewhere, where Ctrl-C belongs to the program.
+    pub fn is_copy(&self) -> bool {
+        let c = self.key.eq_ignore_ascii_case("c");
+        if cfg!(target_os = "macos") {
+            self.platform && c && !self.ctrl && !self.alt
+        } else {
+            (self.with(true, true) && c) || (self.with(true, false) && self.key == "insert")
         }
     }
 }
@@ -71,6 +86,7 @@ pub struct KeyCapture {
     on_key: Option<Dispatcher<KeyPress>>,
     on_text: Option<Dispatcher<String>>,
     on_paste: Option<Dispatcher<String>>,
+    on_copy: Option<Dispatcher<()>>,
     autofocus: bool,
     grow: bool,
     children: Vec<AnyElement>,
@@ -83,6 +99,7 @@ impl KeyCapture {
             on_key: None,
             on_text: None,
             on_paste: None,
+            on_copy: None,
             autofocus: false,
             grow: false,
             children: Vec::new(),
@@ -108,6 +125,13 @@ impl KeyCapture {
     /// instead of the key.
     pub fn on_paste(mut self, dispatcher: Dispatcher<String>) -> Self {
         self.on_paste = Some(dispatcher);
+        self
+    }
+
+    /// On the platform's copy shortcut, dispatches instead of the key. What
+    /// to copy is the view's to decide.
+    pub fn on_copy(mut self, dispatcher: Dispatcher<()>) -> Self {
+        self.on_copy = Some(dispatcher);
         self
     }
 
@@ -285,6 +309,7 @@ impl RenderOnce for KeyCapture {
         };
         let on_key = self.on_key;
         let on_paste = self.on_paste;
+        let on_copy = self.on_copy;
         let clicked: FocusHandle = focus.clone();
         let input_focus = focus.clone();
         // Registers the text input while painting, as GPUI requires.
@@ -331,6 +356,9 @@ impl RenderOnce for KeyCapture {
                     if let Some(text) = text {
                         on_paste.dispatch(text, cx);
                     }
+                    cx.stop_propagation();
+                } else if let (Some(on_copy), true) = (&on_copy, press.is_copy()) {
+                    on_copy.dispatch((), cx);
                     cx.stop_propagation();
                 } else if takes_text && press.is_text() {
                     // Left to propagate: the platform hands it to the text

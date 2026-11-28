@@ -17,6 +17,8 @@ pub struct Colors {
     pub neutral_hover: Hsla,
     pub accent: Hsla,
     pub accent_hover: Hsla,
+    /// Behind text the user selected.
+    pub selection: Hsla,
     /// Text and marks drawn on `accent`, `success` or `danger`.
     pub on_accent: Hsla,
     pub success: Hsla,
@@ -105,6 +107,7 @@ impl Theme {
             neutral_hover: rgb(0x585b70).into(),
             accent: rgb(0x89b4fa).into(),
             accent_hover: rgb(0xa4c4fb).into(),
+            selection: rgb(0x3f4a6b).into(),
             on_accent: rgb(0x11111b).into(),
             success: rgb(0xa6e3a1).into(),
             danger: rgb(0xf38ba8).into(),
@@ -123,6 +126,7 @@ impl Theme {
             neutral_hover: rgb(0xccd0da).into(),
             accent: rgb(0x1e66f5).into(),
             accent_hover: rgb(0x4682f7).into(),
+            selection: rgb(0xc5d3f5).into(),
             on_accent: rgb(0xffffff).into(),
             success: rgb(0x40a02b).into(),
             danger: rgb(0xd20f39).into(),

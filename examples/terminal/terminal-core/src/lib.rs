@@ -46,6 +46,59 @@ impl Screen {
             .map(|spans| spans.iter().map(|s| s.text.as_str()).collect())
             .collect()
     }
+
+    /// The text between `from` and `to`, one line per row with trailing
+    /// blanks dropped, as a terminal copies it.
+    pub fn text_between(&self, from: Point, to: Point) -> String {
+        let lines = self.text();
+        let last = usize::from(to.row).min(lines.len().saturating_sub(1));
+        let rows = lines
+            .iter()
+            .enumerate()
+            .take(last + 1)
+            .skip(usize::from(from.row));
+        rows.map(|(row, line)| {
+            let start = if row == usize::from(from.row) {
+                usize::from(from.col)
+            } else {
+                0
+            };
+            let end = if row == usize::from(to.row) {
+                usize::from(to.col)
+            } else {
+                usize::MAX
+            };
+            let text: String = line.chars().take(end).skip(start).collect();
+            text.trim_end().to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+    }
+}
+
+/// A place between characters on the screen: before the character at
+/// `col` on `row`.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+pub struct Point {
+    pub row: u16,
+    pub col: u16,
+}
+
+/// Text marked with the mouse, from where the button went down to where
+/// it is now. Rows count on the screen as it shows now.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Selection {
+    pub anchor: Point,
+    pub head: Point,
+}
+
+impl Selection {
+    /// The two ends in reading order.
+    pub fn ordered(self) -> (Point, Point) {
+        (self.anchor.min(self.head), self.anchor.max(self.head))
+    }
 }
 
 /// Columns and rows of the terminal grid.
@@ -91,6 +144,8 @@ pub struct Session {
     pub screen: Screen,
     /// Bells rung since the session was last active.
     pub bells: u32,
+    #[serde(default)]
+    pub selection: Option<Selection>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -140,11 +195,35 @@ impl TermState {
         })
     }
 
-    fn type_into_active(&self, input: Input) -> TermCommand {
+    /// Sends `input` to the active session, dropping its selection: the
+    /// screen it was made on is about to change.
+    fn type_into_active(&mut self, input: Input) -> TermCommand {
         match self.active {
-            Some(id) => self.type_into(id, input),
+            Some(id) => {
+                self.select(None);
+                self.type_into(id, input)
+            }
             None => Command::none(),
         }
+    }
+
+    fn active_mut(&mut self) -> Option<&mut Session> {
+        let id = self.active?;
+        self.session_mut(id)
+    }
+
+    fn select(&mut self, selection: Option<Selection>) {
+        if let Some(session) = self.active_mut() {
+            session.selection = selection;
+        }
+    }
+
+    /// The text the active session has selected, if any.
+    fn selected_text(&self) -> Option<String> {
+        let session = self.active_session()?;
+        let (from, to) = session.selection?.ordered();
+        let text = session.screen.text_between(from, to);
+        (!text.is_empty()).then_some(text)
     }
 
     fn activate(&mut self, id: u32) {
@@ -189,6 +268,12 @@ pub enum TermAction {
     Paste(String),
     /// Scrolls the active session by this many lines, up when negative.
     Scroll(i32),
+    /// The mouse went down here in the active session, starting a selection.
+    SelectFrom(Point),
+    /// The mouse moved here while held, ending the selection here.
+    SelectTo(Point),
+    /// Copies the active session's selection to the clipboard.
+    Copy,
     /// Session `id` shows `screen`.
     Painted {
         id: u32,
@@ -227,7 +312,12 @@ pub enum Input {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TermEffect {
-    Input { to: Pty, input: Input },
+    Input {
+        to: Pty,
+        input: Input,
+    },
+    /// Puts this text on the clipboard.
+    Copy(String),
 }
 
 /// The program of one session, in its PTY, behind its VT emulator.
@@ -259,6 +349,7 @@ impl Feature for Terminal {
                     cwd: None,
                     screen: Screen::default(),
                     bells: 0,
+                    selection: None,
                 });
                 state.activate(id);
                 // The store opens the session's stream before it runs this,
@@ -270,6 +361,9 @@ impl Feature for Terminal {
             TermAction::Resized(size) => {
                 if size != state.size && size.cols > 0 && size.rows > 0 {
                     state.size = size;
+                    for session in &mut state.sessions {
+                        session.selection = None;
+                    }
                     let ids: Vec<u32> = state.sessions.iter().map(|s| s.id).collect();
                     return Command::batch(
                         ids.into_iter()
@@ -304,6 +398,20 @@ impl Feature for Terminal {
             TermAction::Paste(text) => {
                 if !text.is_empty() {
                     return state.type_into_active(Input::Paste(text));
+                }
+            }
+            TermAction::SelectFrom(at) => state.select(Some(Selection {
+                anchor: at,
+                head: at,
+            })),
+            TermAction::SelectTo(at) => {
+                if let Some(selection) = state.active_mut().and_then(|s| s.selection.as_mut()) {
+                    selection.head = at;
+                }
+            }
+            TermAction::Copy => {
+                if let Some(text) = state.selected_text() {
+                    return Command::perform(TermEffect::Copy(text));
                 }
             }
             TermAction::Painted { id, screen } => {
