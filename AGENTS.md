@@ -43,6 +43,9 @@ All application logic MUST follow the unidirectional data flow: `Action -> updat
 ### 3.2 Side Effects (`EffectRunner`)
 - All async IO (HTTP, DB, filesystem, timers) MUST be implemented in `EffectRunner<F>` inside `<app>-app`.
 - Long-lived streams (sockets, file watchers, intervals) MUST be opened in `EffectRunner::subscribe`, never kept in `State` or spawned from `run`.
+- To write to an open stream (keys to a terminal, frames to a socket), open a `silon_core::Mailbox` in `subscribe` under the subscription value and `post` to it from `run` by the same value. Post in `run` itself, not in the future it returns, so messages keep dispatch order.
+- Protocol logic (framing, parsing, handshakes) MUST be a `silon_core::Protocol` in `<app>-core`, tested by feeding it bytes and reading the `Exchange`. The runner only connects and hands the connection to `silon_core::converse`.
+- Waiting (retry delays, timeouts) MUST be an `Effect` whose completion is an `Action`. A runner MUST NOT sleep on its own, so the state always shows what it waits for.
 - `Store<F, R>` is the sole owner of `cx.spawn()` and `cx.notify()`. Application code **MUST NOT** call `cx.notify()` manually.
 
 ---
