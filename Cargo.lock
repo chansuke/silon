@@ -5638,7 +5638,6 @@ dependencies = [
  "proptest",
  "schemars",
  "serde",
- "smol",
 ]
 
 [[package]]
