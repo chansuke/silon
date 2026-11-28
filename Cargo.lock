@@ -5632,6 +5632,7 @@ dependencies = [
 name = "silon-core"
 version = "0.1.0"
 dependencies = [
+ "futures-core",
  "proptest",
  "schemars",
  "serde",
@@ -5641,6 +5642,7 @@ dependencies = [
 name = "silon-gpui"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "gpui",
  "schemars",
  "serde",

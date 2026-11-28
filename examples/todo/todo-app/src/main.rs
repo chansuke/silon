@@ -15,7 +15,7 @@ fn main() {
         silon_ui::init(cx);
         components::init(cx);
 
-        let store = cx.new(|_| TodoStore::new(TodoState::default(), NoEffects));
+        let store = cx.new(|cx| TodoStore::new(TodoState::default(), NoEffects, cx));
 
         #[cfg(feature = "introspect")]
         start_introspection(&store, cx);

@@ -7,4 +7,6 @@ exclude_globs = ["**/verification.rs"]
 exclude_re = [
     # `Command::default()` is `Command::None`, so this mutant is equivalent.
     'replace Command<E>::none -> Self with Default::default\(\)',
+    # The default `Feature::subscriptions` already returns an empty vector.
+    'replace Feature::subscriptions -> Vec<Self::Subscription> with vec!\[\]',
 ]

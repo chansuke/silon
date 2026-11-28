@@ -49,6 +49,7 @@ impl Feature for TodoFeature {
     type State = TodoState;
     type Action = TodoAction;
     type Effect = Infallible;
+    type Subscription = Infallible;
 
     fn update(state: &mut TodoState, action: TodoAction) -> Command<Infallible> {
         match action {

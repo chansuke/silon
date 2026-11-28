@@ -7,7 +7,7 @@ use std::rc::Rc;
 use gpui::{AppContext, TestAppContext};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use silon_core::{BoxFuture, Command, EffectRunner, Feature};
+use silon_core::{BoxFuture, BoxStream, Command, EffectRunner, Feature};
 use silon_gpui::{Dispatcher, Store};
 
 struct Tally;
@@ -34,6 +34,7 @@ impl Feature for Tally {
     type State = TallyState;
     type Action = TallyAction;
     type Effect = TallyEffect;
+    type Subscription = std::convert::Infallible;
 
     fn update(state: &mut TallyState, action: TallyAction) -> Command<TallyEffect> {
         state.log.push(format!("{action:?}"));
@@ -57,13 +58,17 @@ impl EffectRunner<Tally> for EchoRunner {
         let TallyEffect::Echo(n) = effect;
         Box::pin(async move { Some(TallyAction::Add(n)) })
     }
+
+    fn subscribe(&self, subscription: std::convert::Infallible) -> BoxStream<'static, TallyAction> {
+        match subscription {}
+    }
 }
 
 type TallyStore = Store<Tally, EchoRunner>;
 
 #[gpui::test]
 fn dispatch_updates_state_and_notifies_observers(cx: &mut TestAppContext) {
-    let store = cx.new(|_| TallyStore::new(TallyState::default(), EchoRunner));
+    let store = cx.new(|cx| TallyStore::new(TallyState::default(), EchoRunner, cx));
     let notified = Rc::new(Cell::new(0));
     let _observer = cx.update(|cx| {
         let notified = notified.clone();
@@ -79,7 +84,7 @@ fn dispatch_updates_state_and_notifies_observers(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn effect_results_are_dispatched_back_into_the_store(cx: &mut TestAppContext) {
-    let store = cx.new(|_| TallyStore::new(TallyState::default(), EchoRunner));
+    let store = cx.new(|cx| TallyStore::new(TallyState::default(), EchoRunner, cx));
 
     store.update(cx, |store, cx| {
         store.dispatch(TallyAction::AddLater(2, 5), cx)
@@ -96,7 +101,7 @@ fn effect_results_are_dispatched_back_into_the_store(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn dispatcher_map_converts_child_actions(cx: &mut TestAppContext) {
-    let store = cx.new(|_| TallyStore::new(TallyState::default(), EchoRunner));
+    let store = cx.new(|cx| TallyStore::new(TallyState::default(), EchoRunner, cx));
     let dispatcher = Dispatcher::from_store(store.downgrade());
     let doubled: Dispatcher<i32> = dispatcher.map(|n| TallyAction::Add(n * 2));
 
@@ -110,7 +115,7 @@ fn dispatcher_map_converts_child_actions(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn dispatch_after_store_release_is_ignored(cx: &mut TestAppContext) {
-    let store = cx.new(|_| TallyStore::new(TallyState::default(), EchoRunner));
+    let store = cx.new(|cx| TallyStore::new(TallyState::default(), EchoRunner, cx));
     let dispatcher = Dispatcher::from_store(store.downgrade());
     drop(store);
     cx.run_until_parked();

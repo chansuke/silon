@@ -35,6 +35,7 @@ impl Feature for CounterFeature {
     type State = CounterState;
     type Action = CounterAction;
     type Effect = CounterEffect;
+    type Subscription = std::convert::Infallible;
 
     fn update(state: &mut CounterState, action: CounterAction) -> Command<CounterEffect> {
         match action {

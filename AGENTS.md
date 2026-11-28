@@ -34,12 +34,15 @@ All application logic MUST follow the unidirectional data flow: `Action -> updat
 - **`Action`**: MUST be an `enum` implementing `Debug + Serialize + DeserializeOwned + JsonSchema + Send + 'static`.
   - Every user interaction and async completion MUST be represented as an `Action` variant.
 - **`Effect`**: MUST be a pure data `enum` describing *what* side effect to perform (e.g., `FetchData { url: String }`), NEVER executing IO directly.
+- **`Subscription`**: MUST be a pure data value (`Clone + Eq + Hash`) naming a stream of actions (e.g., `Events { socket: PathBuf, attempt: u32 }`). Two equal values are the same stream.
+- **`subscriptions(state: &State) -> Vec<Subscription>`**: MUST be pure. The `Store` runs exactly the subscriptions this returns after every dispatch: it opens new ones and drops the ones that disappear. To reconnect after a stream ends, change the value (e.g., bump `attempt`) instead of reopening it from the runner.
 - **`update(state: &mut State, action: Action) -> Command<Effect>`**:
   - MUST be a **100% pure, deterministic function**.
   - **MUST NOT** perform IO, spawn threads/tasks, read system time directly (`SystemTime::now()`), or generate unseeded randomness. Pass time/randomness via `Action` or `Effect`.
 
 ### 3.2 Side Effects (`EffectRunner`)
 - All async IO (HTTP, DB, filesystem, timers) MUST be implemented in `EffectRunner<F>` inside `<app>-app`.
+- Long-lived streams (sockets, file watchers, intervals) MUST be opened in `EffectRunner::subscribe`, never kept in `State` or spawned from `run`.
 - `Store<F, R>` is the sole owner of `cx.spawn()` and `cx.notify()`. Application code **MUST NOT** call `cx.notify()` manually.
 
 ---
@@ -82,6 +85,7 @@ Before concluding any task, agents MUST run and pass the following checks in ord
    ```
    - Every new `Feature` or `Action` branch MUST have a corresponding headless state-transition test using `silon_core::TestHarness<F>`.
    - Assert both the resulting `State` and the exact `emitted_effects`.
+   - For a feature with subscriptions, also assert `TestHarness::subscriptions()` after each transition that should open or close a stream.
 2. **Workspace Typecheck & Lint (Mandatory)**:
    ```bash
    cargo check --workspace --all-targets
