@@ -240,15 +240,22 @@ impl Session {
     fn apply(&self, running: &mut Running, input: Input) -> io::Result<bool> {
         let bytes = match input {
             Input::Key(key) => running.engine.key(&key).map_err(io_error)?,
+            Input::Text(text) => running.engine.text(&text),
             Input::Paste(text) => running.engine.paste(&text).map_err(io_error)?,
             Input::Resize(size) => {
                 running.engine.resize(size).map_err(io_error)?;
                 running.pty.resize(size)?;
                 return Ok(true);
             }
+            Input::Scroll(lines) => {
+                let bytes = running.engine.scroll(lines).map_err(io_error)?;
+                running.writer.write_all(&bytes)?;
+                return Ok(true);
+            }
         };
         running.writer.write_all(&bytes)?;
-        Ok(false)
+        // Typing returns the view to the latest output.
+        Ok(true)
     }
 
     /// Reports the screen; returns false when nobody listens any more.

@@ -181,3 +181,66 @@ fn every_named_key_has_a_code() {
         assert!(code(name).is_none(), "{name}");
     }
 }
+
+fn lines_of(e: &mut Engine, count: usize) {
+    for i in 0..count {
+        e.feed(format!("line {i}\r\n").as_bytes());
+    }
+}
+
+#[test]
+fn scrolling_up_shows_history_and_a_key_returns_to_the_bottom() {
+    let mut e = engine(10, 3);
+    lines_of(&mut e, 10);
+    assert!(!e.screen().unwrap().scrolled_back);
+
+    assert_eq!(e.scroll(-2).unwrap(), b"");
+    let screen = e.screen().unwrap();
+    assert!(screen.scrolled_back);
+    assert_eq!(screen.text()[0], "line 6");
+
+    e.scroll(1).unwrap();
+    assert_eq!(e.screen().unwrap().text()[0], "line 7");
+
+    e.key(&key("a", Some("a"))).unwrap();
+    let screen = e.screen().unwrap();
+    assert!(!screen.scrolled_back);
+    // The last line ended with a newline, so the bottom row is empty; the
+    // key itself only comes back if the program echoes it.
+    assert_eq!(screen.text(), ["line 8", "line 9", ""]);
+}
+
+#[test]
+fn pasting_returns_to_the_bottom() {
+    let mut e = engine(10, 3);
+    lines_of(&mut e, 10);
+    e.scroll(-5).unwrap();
+
+    e.paste("x").unwrap();
+
+    assert!(!e.screen().unwrap().scrolled_back);
+}
+
+#[test]
+fn full_screen_programs_get_arrow_keys_for_scrolling() {
+    let mut e = engine(10, 3);
+    e.feed(b"\x1b[?1049h");
+
+    assert_eq!(e.scroll(-2).unwrap(), b"\x1b[A\x1b[A");
+    assert_eq!(e.scroll(1).unwrap(), b"\x1b[B");
+
+    // In application cursor mode, as less and vim set it.
+    e.feed(b"\x1b[?1h");
+    assert_eq!(e.scroll(-1).unwrap(), b"\x1bOA");
+    assert!(!e.screen().unwrap().scrolled_back);
+}
+
+#[test]
+fn typed_text_goes_as_it_is_and_returns_to_the_bottom() {
+    let mut e = engine(10, 3);
+    lines_of(&mut e, 10);
+    e.scroll(-3).unwrap();
+
+    assert_eq!(e.text("日本語\n"), "日本語\n".as_bytes());
+    assert!(!e.screen().unwrap().scrolled_back);
+}

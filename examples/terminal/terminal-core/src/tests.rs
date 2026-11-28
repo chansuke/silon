@@ -100,6 +100,8 @@ fn keys_and_pastes_go_to_the_active_session() {
     h.take_effects();
 
     h.send(TermAction::Key(key("a")))
+        .send(TermAction::Text("日本".into()))
+        .send(TermAction::Text(String::new()))
         .send(TermAction::Paste("ls\n".into()))
         .send(TermAction::Paste(String::new()));
 
@@ -107,6 +109,7 @@ fn keys_and_pastes_go_to_the_active_session() {
         h.take_effects(),
         [
             input(0, Input::Key(key("a"))),
+            input(0, Input::Text("日本".into())),
             input(0, Input::Paste("ls\n".into())),
         ]
     );
@@ -153,6 +156,7 @@ fn session_reports_update_only_their_session() {
             ..Span::default()
         }]],
         cursor: Some((0, 4)),
+        scrolled_back: false,
     };
 
     h.send(TermAction::Painted {
@@ -204,4 +208,54 @@ fn ids_are_never_reused() {
 
     assert!(h.state.sessions.is_empty());
     assert!(h.take_effects().is_empty());
+}
+
+#[test]
+fn shift_page_keys_scroll_history_instead_of_reaching_the_program() {
+    let mut h = harness();
+    h.send(TermAction::NewSession)
+        .send(TermAction::Resized(Size { cols: 80, rows: 24 }));
+    h.take_effects();
+    let shifted = |name: &str| Key {
+        shift: true,
+        ..key(name)
+    };
+
+    h.send(TermAction::Key(shifted("pageup")))
+        .send(TermAction::Key(shifted("pagedown")))
+        .send(TermAction::Key(key("pageup")));
+
+    assert_eq!(
+        h.take_effects(),
+        [
+            input(0, Input::Scroll(-23)),
+            input(0, Input::Scroll(23)),
+            input(0, Input::Key(key("pageup"))),
+        ]
+    );
+}
+
+#[test]
+fn a_one_row_terminal_still_pages_by_one_line() {
+    let mut h = harness();
+    h.send(TermAction::NewSession)
+        .send(TermAction::Resized(Size { cols: 80, rows: 1 }));
+    h.take_effects();
+    h.send(TermAction::Key(Key {
+        shift: true,
+        ..key("pageup")
+    }));
+
+    assert_eq!(h.take_effects(), [input(0, Input::Scroll(-1))]);
+}
+
+#[test]
+fn the_wheel_scrolls_the_active_session() {
+    let mut h = harness();
+    h.send(TermAction::NewSession);
+    h.take_effects();
+
+    h.send(TermAction::Scroll(-3)).send(TermAction::Scroll(0));
+
+    assert_eq!(h.take_effects(), [input(0, Input::Scroll(-3))]);
 }

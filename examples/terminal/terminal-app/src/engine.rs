@@ -5,9 +5,9 @@
 
 use ghostty_vt::key::{self, Action, Encoder, Mods};
 use ghostty_vt::render::{CellIterator, RenderState, RowIterator};
-use ghostty_vt::screen::CellWide;
+use ghostty_vt::screen::{CellWide, Screen as ScreenKind};
 use ghostty_vt::style::{RgbColor, Underline};
-use ghostty_vt::terminal::{Event, Mode, Options, Terminal};
+use ghostty_vt::terminal::{Event, Mode, Options, ScrollViewport, Terminal};
 use terminal_core::{Key, Rgb, Screen, Size, Span};
 
 pub use ghostty_vt::Error;
@@ -72,8 +72,28 @@ impl Engine {
             .resize(size.cols.max(1), size.rows.max(1), 0, 0)
     }
 
-    /// The bytes for `key`, in the encoding the program asked for.
+    /// Scrolls `lines`, up when negative. Full-screen programs (the
+    /// alternate screen) get arrow keys instead, as with xterm's alternate
+    /// scroll mode; returns the bytes to send them.
+    pub fn scroll(&mut self, lines: i32) -> Result<Vec<u8>, Error> {
+        if self.terminal.active_screen()? == ScreenKind::Alternate {
+            let name = if lines < 0 { "up" } else { "down" };
+            let arrow = Key {
+                key: name.into(),
+                ..Key::default()
+            };
+            let once = self.key(&arrow)?;
+            return Ok(once.repeat(lines.unsigned_abs() as usize));
+        }
+        self.terminal
+            .scroll_viewport(ScrollViewport::Delta(lines as isize));
+        Ok(Vec::new())
+    }
+
+    /// The bytes for `key`, in the encoding the program asked for. Typing
+    /// brings the view back to the latest output.
     pub fn key(&mut self, key: &Key) -> Result<Vec<u8>, Error> {
+        self.terminal.scroll_viewport(ScrollViewport::Bottom);
         let Some(code) = code(&key.key) else {
             // Keys libghostty does not name still type their text.
             return Ok(match (&key.text, key.ctrl || key.alt) {
@@ -113,9 +133,17 @@ impl Engine {
         Ok(bytes)
     }
 
+    /// The bytes for typed `text`: the text itself. Typing brings the view
+    /// back to the latest output.
+    pub fn text(&mut self, text: &str) -> Vec<u8> {
+        self.terminal.scroll_viewport(ScrollViewport::Bottom);
+        text.as_bytes().to_vec()
+    }
+
     /// The bytes for pasting `text`: bracketed when the program asked for
     /// it, with control bytes made harmless.
-    pub fn paste(&self, text: &str) -> Result<Vec<u8>, Error> {
+    pub fn paste(&mut self, text: &str) -> Result<Vec<u8>, Error> {
+        self.terminal.scroll_viewport(ScrollViewport::Bottom);
         let bracketed = self.terminal.mode(Mode::BRACKETED_PASTE)?;
         let mut data = text.as_bytes().to_vec();
         let mut buf = vec![0; data.len() + 16];
@@ -219,6 +247,7 @@ impl Engine {
         Ok(Screen {
             lines,
             cursor: cursor_col,
+            scrolled_back: !self.terminal.is_viewport_active()?,
         })
     }
 }

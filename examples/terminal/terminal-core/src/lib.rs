@@ -33,6 +33,9 @@ pub struct Screen {
     pub lines: Vec<Vec<Span>>,
     /// Row and column of the cursor, when it is shown.
     pub cursor: Option<(u16, u16)>,
+    /// Whether the view shows history instead of the latest output.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub scrolled_back: bool,
 }
 
 impl Screen {
@@ -180,8 +183,12 @@ pub enum TermAction {
     Resized(Size),
     /// A key pressed in the active session.
     Key(Key),
+    /// Text typed into the active session, as an input method committed it.
+    Text(String),
     /// Text pasted into the active session.
     Paste(String),
+    /// Scrolls the active session by this many lines, up when negative.
+    Scroll(i32),
     /// Session `id` shows `screen`.
     Painted {
         id: u32,
@@ -209,8 +216,13 @@ pub enum TermAction {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Input {
     Key(Key),
+    /// Typed text, sent as it is.
+    Text(String),
     Paste(String),
     Resize(Size),
+    /// Lines to scroll, up when negative: through history, or as arrow
+    /// keys when a full-screen program is running.
+    Scroll(i32),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -265,7 +277,30 @@ impl Feature for Terminal {
                     );
                 }
             }
-            TermAction::Key(key) => return state.type_into_active(Input::Key(key)),
+            TermAction::Key(key) => {
+                // Shift with Page Up or Down pages through history, as in
+                // most terminals; the program does not see it.
+                let page = i32::from(state.size.rows.saturating_sub(1).max(1));
+                let paged = match (key.shift, key.key.as_str()) {
+                    (true, "pageup") => Some(-page),
+                    (true, "pagedown") => Some(page),
+                    _ => None,
+                };
+                return match paged {
+                    Some(lines) => state.type_into_active(Input::Scroll(lines)),
+                    None => state.type_into_active(Input::Key(key)),
+                };
+            }
+            TermAction::Scroll(lines) => {
+                if lines != 0 {
+                    return state.type_into_active(Input::Scroll(lines));
+                }
+            }
+            TermAction::Text(text) => {
+                if !text.is_empty() {
+                    return state.type_into_active(Input::Text(text));
+                }
+            }
             TermAction::Paste(text) => {
                 if !text.is_empty() {
                     return state.type_into_active(Input::Paste(text));

@@ -122,7 +122,8 @@ fn screen(state: &TermState, dispatcher: &Dispatcher<TermAction>) -> KeyCapture 
     .fit(
         (state.size.cols, state.size.rows),
         dispatcher.map(|(cols, rows): GridSize| TermAction::Resized(Size { cols, rows })),
-    );
+    )
+    .on_scroll("screen-scroll", dispatcher.map(TermAction::Scroll));
     if let Some((row, col)) = state.active_session().and_then(|s| s.screen.cursor) {
         grid = grid.cursor(usize::from(row), usize::from(col));
     }
@@ -130,10 +131,20 @@ fn screen(state: &TermState, dispatcher: &Dispatcher<TermAction>) -> KeyCapture 
         .grow()
         .autofocus()
         .on_key(dispatcher.map(key))
+        .on_text(dispatcher.map(TermAction::Text))
         .on_paste(dispatcher.map(TermAction::Paste));
     if state.sessions.is_empty() {
         return capture
             .child(Text::new("No sessions. Start one with New session.").tone(Tone::Muted));
     }
-    capture.child(grid)
+    let scrolled_back = state
+        .active_session()
+        .is_some_and(|session| session.screen.scrolled_back);
+    capture
+        .children(scrolled_back.then(|| {
+            Text::new("Showing history. Type or press Shift+PageDown to return.")
+                .size(TextSize::Caption)
+                .tone(Tone::Accent)
+        }))
+        .child(grid)
 }
