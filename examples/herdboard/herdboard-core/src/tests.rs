@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use silon_core::TestHarness;
 
 use super::*;
@@ -159,46 +161,122 @@ fn a_missed_notification_replaces_the_list() {
     assert_eq!(h.state.selected.as_deref(), Some("t3"));
 }
 
-#[test]
-fn the_end_of_a_stream_opens_the_next_attempt() {
-    let mut h = live(vec![]);
-    assert_eq!(
-        h.subscriptions(),
-        [Events {
-            socket: "/run/hc.sock".into(),
-            attempt: 0,
-        }]
-    );
+fn events(attempt: u32) -> Stream {
+    Stream::Events {
+        socket: "/run/hc.sock".into(),
+        attempt,
+    }
+}
 
-    h.send(HerdAction::Disconnected {
-        attempt: 0,
-        error: "connection refused".into(),
-    });
-
-    assert_eq!(h.state.link, Link::Down("connection refused".into()));
-    assert_eq!(
-        h.subscriptions(),
-        [Events {
-            socket: "/run/hc.sock".into(),
-            attempt: 1,
-        }]
-    );
+fn disconnected(attempt: u32, error: &str) -> HerdAction {
+    HerdAction::Disconnected {
+        attempt,
+        error: error.into(),
+    }
 }
 
 #[test]
-fn the_end_of_an_older_stream_changes_nothing() {
+fn the_end_of_a_stream_waits_then_opens_the_next_attempt() {
     let mut h = live(vec![]);
-    h.send(HerdAction::Disconnected {
+    assert_eq!(h.subscriptions(), [events(0)]);
+
+    h.send(disconnected(0, "connection refused"));
+    assert_eq!(
+        h.state.link,
+        Link::Waiting {
+            error: "connection refused".into(),
+            delay_ms: 500,
+        }
+    );
+    assert_eq!(
+        h.take_effects(),
+        [HerdEffect::Wait {
+            attempt: 0,
+            delay: Duration::from_millis(500),
+        }]
+    );
+    assert_eq!(h.subscriptions(), []);
+
+    h.send(HerdAction::Retry { attempt: 0 });
+    assert_eq!(h.state.link, Link::Connecting);
+    assert_eq!(h.subscriptions(), [events(1)]);
+}
+
+#[test]
+fn each_failure_in_a_row_doubles_the_wait_and_a_snapshot_resets_it() {
+    let mut h = live(vec![]);
+    let mut waits = Vec::new();
+    for attempt in 0..3 {
+        h.send(disconnected(attempt, "refused"))
+            .send(HerdAction::Retry { attempt });
+        waits.extend(h.take_effects());
+    }
+    let delays: Vec<_> = waits
+        .iter()
+        .map(|effect| match effect {
+            HerdEffect::Wait { delay, .. } => delay.as_millis(),
+            other => panic!("unexpected {other:?}"),
+        })
+        .collect();
+    assert_eq!(delays, [500, 1000, 2000]);
+    assert_eq!(h.state.failures, 3);
+
+    h.send(HerdAction::Snapshot {
+        attempt: 3,
+        seq: 1,
+        terminals: vec![],
+    });
+    assert_eq!(h.state.failures, 0);
+    assert_eq!(h.state.link, Link::Live);
+}
+
+#[test]
+fn the_wait_stops_growing_at_thirty_seconds() {
+    assert_eq!(backoff(1), Duration::from_millis(500));
+    assert_eq!(backoff(7), Duration::from_secs(30));
+    assert_eq!(backoff(u32::MAX), Duration::from_secs(30));
+}
+
+#[test]
+fn the_end_of_an_older_or_waiting_stream_changes_nothing() {
+    let mut h = live(vec![]);
+    h.send(disconnected(0, "eof"))
+        .send(disconnected(0, "eof again"));
+
+    assert_eq!(h.take_effects().len(), 1);
+    assert_eq!(h.state.failures, 1);
+
+    h.send(HerdAction::Retry { attempt: 0 })
+        .send(disconnected(0, "late"))
+        .send(HerdAction::Retry { attempt: 0 });
+    assert_eq!(h.state.attempt, 1);
+    assert_eq!(h.state.link, Link::Connecting);
+    assert!(h.take_effects().is_empty());
+}
+
+#[test]
+fn a_retry_only_counts_while_waiting_for_that_attempt() {
+    let mut h = live(vec![]);
+    h.send(HerdAction::Retry { attempt: 0 });
+    assert_eq!((h.state.attempt, &h.state.link), (0, &Link::Live));
+
+    h.send(disconnected(0, "eof"))
+        .send(HerdAction::Retry { attempt: 7 });
+    assert_eq!(h.state.attempt, 0);
+    assert!(matches!(h.state.link, Link::Waiting { .. }));
+}
+
+#[test]
+fn a_snapshot_while_waiting_changes_nothing() {
+    let mut h = live(vec![]);
+    h.send(disconnected(0, "eof")).send(HerdAction::Snapshot {
         attempt: 0,
-        error: "eof".into(),
-    })
-    .send(HerdAction::Disconnected {
-        attempt: 0,
-        error: "eof again".into(),
+        seq: 99,
+        terminals: vec![terminal("t1", "live")],
     });
 
-    assert_eq!(h.state.attempt, 1);
-    assert_eq!(h.state.link, Link::Down("eof".into()));
+    assert!(h.state.terminals.is_empty());
+    assert_eq!(h.state.seq, 10);
 }
 
 #[test]
@@ -347,4 +425,407 @@ fn the_first_line_of_the_recording_is_the_subscribe_reply() {
     };
     assert_eq!(seq, 2);
     assert_eq!(terminals.len(), 1);
+}
+
+fn attach(terminal: &str, attempt: u32) -> Stream {
+    Stream::Attach {
+        socket: "/run/hc.sock".into(),
+        terminal: terminal.into(),
+        attempt,
+    }
+}
+
+fn screen(line: &str) -> Screen {
+    Screen {
+        lines: vec![line.into()],
+        cursor: (0, 0),
+    }
+}
+
+#[test]
+fn the_selected_live_terminal_is_attached_and_each_selection_gets_a_new_stream() {
+    let mut h = live(vec![terminal("t1", "live"), terminal("t2", "live")]);
+    assert_eq!(h.subscriptions(), [events(0), attach("t1", 1)]);
+
+    h.send(HerdAction::Select("t2".into()));
+    assert_eq!(h.subscriptions(), [events(0), attach("t2", 2)]);
+
+    h.send(HerdAction::Select("t2".into()));
+    assert_eq!(h.state.attachment.attempt, 2);
+}
+
+#[test]
+fn nothing_is_attached_while_waiting_or_when_the_terminal_finished() {
+    let finished = live(vec![terminal("t1", "finished")]);
+    assert_eq!(finished.subscriptions(), [events(0)]);
+
+    let mut h = live(vec![terminal("t1", "live")]);
+    h.send(disconnected(0, "eof"));
+    assert_eq!(h.subscriptions(), []);
+}
+
+#[test]
+fn only_paints_from_the_current_attachment_reach_the_screen() {
+    let mut h = live(vec![terminal("t1", "live"), terminal("t2", "live")]);
+    let painted = |terminal: &str, attempt, line: &str| HerdAction::Painted {
+        terminal: terminal.into(),
+        attempt,
+        screen: screen(line),
+    };
+
+    h.send(painted("t1", 1, "first"));
+    assert_eq!(h.state.attachment.screen, Some(screen("first")));
+
+    h.send(HerdAction::Select("t2".into()));
+    assert_eq!(h.state.attachment.screen, None);
+    h.send(painted("t1", 1, "late"))
+        .send(painted("t2", 1, "wrong attempt"));
+    assert_eq!(h.state.attachment.screen, None);
+
+    h.send(painted("t2", 2, "second"));
+    assert_eq!(h.state.attachment.screen, Some(screen("second")));
+}
+
+#[test]
+fn a_detached_stream_stays_closed_until_reattach() {
+    let mut h = live(vec![terminal("t1", "live")]);
+    h.send(HerdAction::Reattach);
+    assert_eq!(h.state.attachment.attempt, 1);
+
+    h.send(HerdAction::Detached {
+        terminal: "t1".into(),
+        attempt: 1,
+        reason: "exited, exit code 0".into(),
+    });
+    assert_eq!(
+        h.state.attachment.ended.as_deref(),
+        Some("exited, exit code 0")
+    );
+    assert_eq!(h.subscriptions(), [events(0)]);
+
+    h.send(HerdAction::Reattach);
+    assert_eq!(h.state.attachment.ended, None);
+    assert_eq!(h.subscriptions(), [events(0), attach("t1", 2)]);
+}
+
+#[test]
+fn a_detach_from_an_older_attachment_changes_nothing() {
+    let mut h = live(vec![terminal("t1", "live")]);
+    h.send(HerdAction::Detached {
+        terminal: "t1".into(),
+        attempt: 0,
+        reason: "old".into(),
+    });
+
+    assert_eq!(h.state.attachment.ended, None);
+}
+
+#[test]
+fn keys_are_typed_into_the_attached_terminal() {
+    let mut h = live(vec![terminal("t1", "live")]);
+    let key = |key: &str, text: Option<&str>| {
+        HerdAction::Key(Key {
+            key: key.into(),
+            text: text.map(Into::into),
+            ..Key::default()
+        })
+    };
+
+    h.send(key("l", Some("l"))).send(key("shift", None));
+    assert_eq!(
+        h.take_effects(),
+        [HerdEffect::Type {
+            to: attach("t1", 1),
+            bytes: b"l".to_vec(),
+        }]
+    );
+
+    let mut finished = live(vec![terminal("t1", "finished")]);
+    finished.send(key("l", Some("l")));
+    assert!(finished.take_effects().is_empty());
+}
+
+mod protocols {
+    use silon_core::{Exchange, Protocol};
+
+    use super::*;
+    use crate::protocols::{Attach, Events, SendText};
+    use crate::wire::{Frame, Kind, attach_request, hello_request};
+
+    fn feed<P: Protocol>(protocol: &mut P, bytes: &[u8]) -> Exchange<P::Action> {
+        let mut exchange = Exchange::new();
+        protocol.receive(bytes, &mut exchange);
+        exchange
+    }
+
+    fn opened<P: Protocol>(protocol: &mut P) -> Vec<u8> {
+        let mut exchange = Exchange::new();
+        protocol.open(&mut exchange);
+        exchange.take_written()
+    }
+
+    #[test]
+    fn events_asks_for_the_stream_and_reads_lines_across_chunks() {
+        let mut events = Events::new(0);
+        assert_eq!(opened(&mut events), subscribe_request().into_bytes());
+
+        let mut actions = Vec::new();
+        for chunk in EVENTS.as_bytes().chunks(7) {
+            actions.extend(feed(&mut events, chunk).take_actions());
+        }
+        let expected: Vec<_> = lines()
+            .iter()
+            .filter_map(|line| decode_stream_line(0, line))
+            .collect();
+        assert_eq!(actions, expected);
+    }
+
+    #[test]
+    fn events_ends_on_a_reply_error() {
+        let mut events = Events::new(4);
+        opened(&mut events);
+        let mut exchange = feed(
+            &mut events,
+            b"{\"error\":{\"message\":\"stopping\"},\"id\":1}\n{\"method\":\"heartbeat\"}\n",
+        );
+
+        assert_eq!(exchange.take_actions(), [disconnected(4, "stopping")]);
+        assert!(exchange.is_finished());
+        assert_eq!(
+            Events::new(4).closed(std::io::ErrorKind::BrokenPipe.into()),
+            Some(disconnected(4, "broken pipe"))
+        );
+    }
+
+    #[test]
+    fn send_writes_the_request_and_ends_with_the_reply() {
+        let mut send = SendText::new("t1".into(), "hi".into());
+        assert_eq!(opened(&mut send), send_request("t1", "hi").into_bytes());
+
+        assert!(
+            feed(&mut send, b"{\"id\":1,\"result\":")
+                .take_actions()
+                .is_empty()
+        );
+        let mut exchange = feed(&mut send, b"{\"turn\":3}}\n");
+        assert_eq!(
+            exchange.take_actions(),
+            [HerdAction::Sent {
+                terminal: "t1".into(),
+                result: Ok(3),
+            }]
+        );
+        assert!(exchange.is_finished());
+
+        let closed = SendText::new("t1".into(), "hi".into())
+            .closed(std::io::ErrorKind::ConnectionRefused.into());
+        assert!(matches!(
+            closed,
+            Some(HerdAction::Sent { result: Err(_), .. })
+        ));
+    }
+
+    const HELLO: &[u8] = b"{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"framed\":true}}\n";
+    /// The start of a real first paint, then a prompt.
+    const PAINT: &[u8] = b"\x18\x1b[!p\x1b[?1049l\x1b[H\x1b[2J$ ";
+
+    fn data(channel: u32, payload: &[u8]) -> Vec<u8> {
+        Frame::new(channel, Kind::Data, payload.to_vec()).encode()
+    }
+
+    fn attached_reply() -> Vec<u8> {
+        data(
+            0,
+            br#"{"id":2,"jsonrpc":"2.0","result":{"channel":1,"automatic_input":true}}"#,
+        )
+    }
+
+    fn credit(n: u32) -> Vec<u8> {
+        Frame::new(1, Kind::Credit, n.to_le_bytes().to_vec()).encode()
+    }
+
+    fn screen_of(actions: &[HerdAction]) -> Option<&Screen> {
+        actions.iter().rev().find_map(|action| match action {
+            HerdAction::Painted { screen, .. } => Some(screen),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn attach_says_hello_attaches_paints_and_gives_credit() {
+        let mut attach = Attach::new("t1".into(), 5);
+        assert_eq!(opened(&mut attach), hello_request().into_bytes());
+
+        let mut exchange = feed(&mut attach, HELLO);
+        let request = Frame::new(0, Kind::Data, attach_request("t1", SIZE)).encode();
+        assert_eq!(exchange.take_written(), request);
+
+        let echo = b"echo hi\r\nhi\r\n$ ";
+        let server = [attached_reply(), data(1, PAINT), data(1, echo)].concat();
+        let mut exchange = feed(&mut attach, &server);
+        let painted = (PAINT.len() + echo.len()) as u32;
+        assert_eq!(exchange.take_written(), credit(painted));
+        let actions = exchange.take_actions();
+        assert!(matches!(
+            &actions[..],
+            [HerdAction::Painted { terminal, attempt: 5, .. }] if terminal == "t1"
+        ));
+        let screen = screen_of(&actions).unwrap();
+        assert_eq!(screen.lines[..3], ["$ echo hi", "hi", "$ "]);
+        assert_eq!(screen.lines.len(), usize::from(SIZE.1));
+        assert_eq!(screen.cursor, (2, 2));
+    }
+
+    #[test]
+    fn attach_reads_frames_split_at_any_byte() {
+        let mut attach = Attach::new("t1".into(), 0);
+        opened(&mut attach);
+        let server = [
+            HELLO.to_vec(),
+            attached_reply(),
+            data(1, PAINT),
+            data(1, b"ls\r\n"),
+        ]
+        .concat();
+
+        let mut actions = Vec::new();
+        let mut written = Vec::new();
+        for byte in &server {
+            let mut exchange = feed(&mut attach, std::slice::from_ref(byte));
+            actions.extend(exchange.take_actions());
+            written.extend(exchange.take_written());
+        }
+
+        assert_eq!(screen_of(&actions).unwrap().lines[0], "$ ls");
+        let mut credits = 0;
+        while let Some(frame) = Frame::take(&mut written) {
+            if frame.is(Kind::Credit) {
+                credits += u32::from_le_bytes(frame.payload[..].try_into().unwrap());
+            }
+        }
+        assert_eq!(credits as usize, PAINT.len() + 4);
+    }
+
+    #[test]
+    fn keys_typed_before_the_channel_is_known_follow_the_attach_reply() {
+        let mut attach = Attach::new("t1".into(), 0);
+        opened(&mut attach);
+        let mut early = Exchange::new();
+        attach.input(b"ab".to_vec(), &mut early);
+        assert!(early.take_written().is_empty());
+
+        feed(&mut attach, HELLO);
+        let mut exchange = feed(&mut attach, &attached_reply());
+        assert_eq!(exchange.take_written(), data(1, b"ab"));
+
+        let mut later = Exchange::new();
+        attach.input(b"\r".to_vec(), &mut later);
+        assert_eq!(later.take_written(), data(1, b"\r"));
+    }
+
+    fn detached(reason: &str) -> HerdAction {
+        HerdAction::Detached {
+            terminal: "t1".into(),
+            attempt: 0,
+            reason: reason.into(),
+        }
+    }
+
+    #[test]
+    fn attach_ends_when_the_program_exits() {
+        let mut attach = Attach::new("t1".into(), 0);
+        opened(&mut attach);
+        feed(&mut attach, &[HELLO.to_vec(), attached_reply()].concat());
+
+        let close = Frame::new(
+            1,
+            Kind::Close,
+            br#"{"reason":"exited","exit_code":0,"signal":null}"#.to_vec(),
+        );
+        let mut exchange = feed(&mut attach, &close.encode());
+
+        assert_eq!(exchange.take_actions(), [detached("exited, exit code 0")]);
+        assert!(exchange.is_finished());
+    }
+
+    #[test]
+    fn attach_ends_on_an_error_reply() {
+        let mut attach = Attach::new("t1".into(), 0);
+        opened(&mut attach);
+        feed(&mut attach, HELLO);
+        let refused = data(
+            0,
+            br#"{"id":2,"error":{"code":-32000,"message":"no terminal \"t1\""}}"#,
+        );
+        let mut exchange = feed(&mut attach, &refused);
+        assert_eq!(exchange.take_actions(), [detached("no terminal \"t1\"")]);
+        assert!(exchange.is_finished());
+
+        let mut attach = Attach::new("t1".into(), 0);
+        let mut exchange = feed(
+            &mut attach,
+            b"{\"id\":1,\"error\":{\"message\":\"old core\"}}\n",
+        );
+        assert_eq!(exchange.take_actions(), [detached("old core")]);
+
+        assert_eq!(
+            Attach::new("t1".into(), 0).closed(std::io::ErrorKind::BrokenPipe.into()),
+            Some(detached("broken pipe"))
+        );
+    }
+
+    #[test]
+    fn hello_and_attach_requests_carry_their_parameters() {
+        let hello: serde_json::Value = serde_json::from_str(&hello_request()).unwrap();
+        assert_eq!(hello["method"], "hello");
+        assert_eq!(hello["params"]["framed"], true);
+
+        let attach: serde_json::Value =
+            serde_json::from_slice(&attach_request("t9", (80, 20))).unwrap();
+        assert_eq!(attach["id"], 2);
+        assert_eq!(attach["method"], "terminal.attach");
+        assert_eq!(
+            attach["params"],
+            serde_json::json!({ "terminal": "t9", "cols": 80, "rows": 20 })
+        );
+    }
+
+    #[test]
+    fn take_lines_keeps_a_partial_line_for_later() {
+        let mut pending = b"a\nb\nc".to_vec();
+        assert_eq!(crate::wire::take_lines(&mut pending), ["a", "b"]);
+        assert_eq!(pending, b"c");
+
+        pending.extend_from_slice(b"\n");
+        assert_eq!(crate::wire::take_lines(&mut pending), ["c"]);
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn while_attaching_only_a_data_reply_on_channel_zero_counts() {
+        let mut attach = Attach::new("t1".into(), 0);
+        opened(&mut attach);
+        feed(&mut attach, HELLO);
+        let reply = br#"{"id":2,"jsonrpc":"2.0","result":{"channel":1}}"#;
+
+        let elsewhere = data(7, reply);
+        let not_data = Frame::new(0, Kind::Close, reply.to_vec()).encode();
+        let mut exchange = feed(&mut attach, &[elsewhere, not_data].concat());
+        assert!(exchange.take_written().is_empty());
+
+        let mut early = Exchange::new();
+        attach.input(b"x".to_vec(), &mut early);
+        assert!(early.take_written().is_empty(), "attached too soon");
+    }
+
+    #[test]
+    fn attach_ignores_other_channels() {
+        let mut attach = Attach::new("t1".into(), 0);
+        opened(&mut attach);
+        feed(&mut attach, &[HELLO.to_vec(), attached_reply()].concat());
+
+        let mut exchange = feed(&mut attach, &data(7, b"not ours"));
+        assert!(exchange.take_actions().is_empty());
+        assert!(exchange.take_written().is_empty());
+    }
 }
