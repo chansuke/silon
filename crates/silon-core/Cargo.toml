@@ -18,4 +18,3 @@ serde.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
-smol.workspace = true

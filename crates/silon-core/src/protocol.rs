@@ -97,6 +97,10 @@ pub trait Protocol: Send + 'static {
 /// Bytes read from the connection at a time (64 KiB).
 const READ_SIZE: usize = 65_536;
 
+/// Steps one poll may take before it yields, so a peer that never stops
+/// sending cannot starve the other tasks of the executor.
+const STEPS_PER_POLL: u32 = 32;
+
 enum Phase<C, T> {
     Connecting(Pin<Box<C>>),
     Open(T),
@@ -204,7 +208,7 @@ where
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<P::Action>> {
         let this = self.get_mut();
-        loop {
+        for _ in 0..STEPS_PER_POLL {
             if let Some(action) = this.actions.pop_front() {
                 return Poll::Ready(Some(action));
             }
@@ -260,6 +264,8 @@ where
                 Poll::Pending => return Poll::Pending,
             }
         }
+        cx.waker().wake_by_ref();
+        Poll::Pending
     }
 }
 
@@ -358,18 +364,25 @@ mod tests {
             written: written.clone(),
         };
         let stream = converse(Chat, async move { Ok(script) }, inputs);
-        let heard = smol::block_on(collect(stream));
+        let heard = collect(stream);
         let written = String::from_utf8(written.lock().unwrap().clone()).unwrap();
         (heard, written)
     }
 
-    async fn collect<S: Stream + Unpin>(mut stream: S) -> Vec<S::Item> {
+    /// Polls `stream` to its end. Every test stream is ready at once, so a
+    /// stream that needs more than a few polls is stuck; that fails the test
+    /// instead of hanging it.
+    fn collect<S: Stream + Unpin>(mut stream: S) -> Vec<S::Item> {
+        let mut cx = Context::from_waker(std::task::Waker::noop());
         let mut items = Vec::new();
-        while let Some(item) = std::future::poll_fn(|cx| Pin::new(&mut stream).poll_next(cx)).await
-        {
-            items.push(item);
+        for _ in 0..1_000 {
+            match Pin::new(&mut stream).poll_next(&mut cx) {
+                Poll::Ready(Some(item)) => items.push(item),
+                Poll::Ready(None) => return items,
+                Poll::Pending => {}
+            }
         }
-        items
+        panic!("the stream did not end; it yielded {} items", items.len());
     }
 
     fn no_inputs() -> impl Stream<Item = &'static str> + Unpin + Send + 'static {
@@ -421,9 +434,34 @@ mod tests {
         let stream = converse(Chat, refused, no_inputs());
 
         assert_eq!(
-            smol::block_on(collect(stream)),
+            collect(stream),
             [Heard::Closed(io::ErrorKind::ConnectionRefused)]
         );
+    }
+
+    #[test]
+    fn a_peer_that_keeps_sending_does_not_hold_the_poll() {
+        let chunks = (STEPS_PER_POLL * 3) as usize;
+        let script = Script {
+            incoming: vec![b"x".to_vec(); chunks].into(),
+            written: Arc::default(),
+        };
+        // Emits nothing, so only the step limit can end a poll early.
+        struct Quiet;
+        impl Protocol for Quiet {
+            type Action = ();
+            type Input = &'static str;
+            fn receive(&mut self, _: &[u8], _: &mut Exchange<()>) {}
+            fn input(&mut self, _: &'static str, _: &mut Exchange<()>) {}
+            fn closed(self, _: io::Error) -> Option<()> {
+                Some(())
+            }
+        }
+        let mut stream = converse(Quiet, async move { Ok(script) }, no_inputs());
+        let mut cx = Context::from_waker(std::task::Waker::noop());
+
+        assert!(stream.as_mut().poll_next(&mut cx).is_pending());
+        assert_eq!(collect(stream), [()]);
     }
 
     #[test]
