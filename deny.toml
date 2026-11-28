@@ -28,6 +28,13 @@ allow = [
     "Zlib",
 ]
 confidence-threshold = 0.9
+# Mozilla's root certificates, used only by the build script of
+# ghostty-vt-sys to download the libghostty-vt release. Nothing of them is
+# linked into an app.
+exceptions = [
+    { crate = "webpki-roots", allow = ["CDLA-Permissive-2.0"] },
+    { crate = "webpki-root-certs", allow = ["CDLA-Permissive-2.0"] },
+]
 
 [bans]
 multiple-versions = "allow"
