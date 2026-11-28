@@ -44,8 +44,11 @@ impl<F: Feature, R: EffectRunner<F>, V: FeatureView<F>> FeatureRoot<F, R, V> {
 
 impl<F: Feature, R: EffectRunner<F>, V: FeatureView<F>> Render for FeatureRoot<F, R, V> {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Clone so the view can borrow `cx` mutably while reading state.
-        let state = self.store.read(cx).state().clone();
-        V::view(&state, self.dispatcher.clone(), window, cx)
+        // Borrow the state through `update` so the view gets `cx` mutably
+        // without a copy of the state. The view cannot reach the store, so
+        // nothing re-enters it during the call.
+        let dispatcher = self.dispatcher.clone();
+        self.store
+            .update(cx, |store, cx| V::view(store.state(), dispatcher, window, cx))
     }
 }
