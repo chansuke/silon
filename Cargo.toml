@@ -10,6 +10,8 @@ members = [
     "examples/counter/counter-app",
     "examples/todo/todo-core",
     "examples/todo/todo-app",
+    "examples/herdboard/herdboard-core",
+    "examples/herdboard/herdboard-app",
 ]
 
 [workspace.package]
@@ -29,6 +31,7 @@ silon-gpui = { path = "crates/silon-gpui" }
 silon-ui = { path = "crates/silon-ui" }
 counter-core = { path = "examples/counter/counter-core" }
 todo-core = { path = "examples/todo/todo-core" }
+herdboard-core = { path = "examples/herdboard/herdboard-core" }
 
 gpui = "0.2.2"
 # 0.5.1 is the last release built on crates.io gpui 0.2; 0.6+ uses the gpui-pre fork.

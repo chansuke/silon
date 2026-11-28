@@ -1,0 +1,23 @@
+[package]
+name = "herdboard-app"
+description = "GPUI dashboard for herdr-core terminals built with Silon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+## Serves the dashboard on http://127.0.0.1:3737 for agents.
+introspect = ["silon-gpui/introspect", "dep:silon-introspect"]
+
+[dependencies]
+gpui.workspace = true
+herdboard-core.workspace = true
+silon-core.workspace = true
+silon-gpui.workspace = true
+silon-introspect = { workspace = true, optional = true }
+silon-ui = { workspace = true, features = ["components"] }
+smol.workspace = true

@@ -1,0 +1,16 @@
+[package]
+name = "herdboard-core"
+description = "Pure herdr-core dashboard feature for the Silon example app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+silon-core.workspace = true
