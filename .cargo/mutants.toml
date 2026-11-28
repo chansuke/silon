@@ -9,4 +9,6 @@ exclude_re = [
     'replace Command<E>::none -> Self with Default::default\(\)',
     # The default `Feature::subscriptions` already returns an empty vector.
     'replace Feature::subscriptions -> Vec<Self::Subscription> with vec!\[\]',
+    # The default `Protocol::open` already writes nothing.
+    'replace Protocol::open with \(\)',
 ]

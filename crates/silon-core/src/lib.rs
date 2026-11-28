@@ -6,14 +6,21 @@
 //! crate turns them into futures that may produce follow-up actions.
 //! Subscriptions are plain data too: [`Feature::subscriptions`] says which
 //! streams of actions should run for a state, and the runner opens them.
+//! A runner speaks to a peer through a sans-IO [`Protocol`] run by
+//! [`converse`], and reaches an open stream from an effect through
+//! [`Mailboxes`].
 
 mod harness;
 mod history;
+mod mailbox;
+pub mod protocol;
 #[cfg(kani)]
 mod verification;
 
 pub use harness::TestHarness;
 pub use history::{History, ReplayError};
+pub use mailbox::{Mailbox, Mailboxes};
+pub use protocol::{Exchange, Protocol, converse};
 
 use futures_core::Stream;
 use schemars::JsonSchema;
