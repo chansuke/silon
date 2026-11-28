@@ -1,7 +1,9 @@
 use gpui::{
-    App, FontStyle, FontWeight, Hsla, IntoElement, ParentElement, RenderOnce, Rgba, Styled,
-    StyledText, TextRun, UnderlineStyle, Window, div, font, px,
+    App, Bounds, FontStyle, FontWeight, Hsla, IntoElement, ParentElement, Pixels, RenderOnce, Rgba,
+    Styled, StyledText, TextRun, UnderlineStyle, Window, canvas, div, font, prelude::FluentBuilder,
+    px,
 };
+use silon_gpui::Dispatcher;
 
 use crate::Theme;
 
@@ -44,6 +46,31 @@ pub struct Span {
 pub struct TextGrid {
     lines: Vec<Vec<Span>>,
     cursor: Option<(usize, usize)>,
+    fit: Option<Fit>,
+}
+
+/// Columns and rows of a grid.
+pub type GridSize = (u16, u16);
+
+struct Fit {
+    current: GridSize,
+    on_fit: Dispatcher<GridSize>,
+}
+
+/// Line height as a multiple of the font size.
+const LINE_HEIGHT: f32 = 1.3;
+
+/// The columns and rows of `cell` that fit in `bounds`, at least one each.
+fn cells_in(bounds: Bounds<Pixels>, cell: gpui::Size<Pixels>) -> GridSize {
+    let count = |space: Pixels, step: Pixels| {
+        let n = (f32::from(space) / f32::from(step).max(1.)).floor();
+        // Saturates: NaN becomes 0, huge values u16::MAX.
+        (n as u16).max(1)
+    };
+    (
+        count(bounds.size.width, cell.width),
+        count(bounds.size.height, cell.height),
+    )
 }
 
 impl TextGrid {
@@ -51,7 +78,17 @@ impl TextGrid {
         Self {
             lines,
             cursor: None,
+            fit: None,
         }
+    }
+
+    /// Fills the space it is given and dispatches the columns and rows that
+    /// fit there whenever they differ from `current`, the size the content
+    /// was made for. A view learns its size this way, as an action after
+    /// layout, instead of reading the window while it renders.
+    pub fn fit(mut self, current: GridSize, on_fit: Dispatcher<GridSize>) -> Self {
+        self.fit = Some(Fit { current, on_fit });
+        self
     }
 
     /// Draws a block cursor on `row`, `col` (zero-based, in characters).
@@ -178,19 +215,45 @@ impl RenderOnce for TextGrid {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = Theme::of(cx);
         let family = theme.font_mono.clone();
+        let size = theme.text_body;
+        let line_height = px((f32::from(size) * LINE_HEIGHT).round());
         let text = theme.colors.text;
         let cursor_colors = CursorColors {
             fg: theme.colors.background,
             bg: theme.colors.accent,
         };
+        let measure = self.fit.map(|Fit { current, on_fit }| {
+            let family = family.clone();
+            canvas(
+                move |bounds, window, cx| {
+                    let text_system = window.text_system();
+                    let font_id = text_system.resolve_font(&font(family));
+                    let Ok(advance) = text_system.advance(font_id, size, 'm') else {
+                        return;
+                    };
+                    let cell = gpui::size(advance.width, line_height);
+                    let fits = cells_in(bounds, cell);
+                    if fits != current {
+                        cx.defer(move |cx| on_fit.dispatch(fits, cx));
+                    }
+                },
+                |_, (), _, _| {},
+            )
+            .absolute()
+            .size_full()
+        });
         div()
+            .relative()
             .flex()
             .flex_col()
+            .when(measure.is_some(), |d| d.size_full().overflow_hidden())
             .font_family(family.clone())
-            .text_size(theme.text_body)
+            .text_size(size)
+            .line_height(line_height)
+            .children(measure)
             .children(self.lines.iter().enumerate().map(|(row, spans)| {
                 let col = self.cursor.and_then(|(r, c)| (r == row).then_some(c));
-                div().whitespace_nowrap().child(render_line(
+                div().h(line_height).whitespace_nowrap().child(render_line(
                     spans,
                     col,
                     &family,
@@ -254,6 +317,23 @@ mod tests {
     fn characters_count_as_one_column_each() {
         let (spans, index) = isolate(&[span("日本語")], 1);
         assert_eq!((texts(&spans), index), (vec!["日", "本", "語"], 1));
+    }
+
+    #[test]
+    fn the_cells_that_fit_round_down_and_never_reach_zero() {
+        let bounds = |w: f32, h: f32| Bounds {
+            origin: gpui::point(px(0.), px(0.)),
+            size: gpui::size(px(w), px(h)),
+        };
+        let cell = gpui::size(px(8.), px(18.));
+
+        assert_eq!(cells_in(bounds(800., 540.), cell), (100, 30));
+        assert_eq!(cells_in(bounds(807.9, 557.), cell), (100, 30));
+        assert_eq!(cells_in(bounds(3., 0.), cell), (1, 1));
+        assert_eq!(
+            cells_in(bounds(800., 540.), gpui::size(px(0.), px(0.))),
+            (800, 540)
+        );
     }
 
     #[test]

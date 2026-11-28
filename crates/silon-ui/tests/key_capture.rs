@@ -13,10 +13,13 @@ use silon_ui::{KeyCapture, KeyPress, Text};
 struct Keys;
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-struct Pressed {
-    key: String,
-    text: Option<String>,
-    ctrl: bool,
+enum Pressed {
+    Key {
+        key: String,
+        text: Option<String>,
+        ctrl: bool,
+    },
+    Paste(String),
 }
 
 impl Feature for Keys {
@@ -26,8 +29,13 @@ impl Feature for Keys {
     type Subscription = std::convert::Infallible;
 
     fn update(log: &mut Vec<String>, pressed: Pressed) -> Command<Self::Effect> {
-        let ctrl = if pressed.ctrl { "ctrl-" } else { "" };
-        log.push(format!("{ctrl}{} {:?}", pressed.key, pressed.text));
+        log.push(match pressed {
+            Pressed::Key { key, text, ctrl } => {
+                let ctrl = if ctrl { "ctrl-" } else { "" };
+                format!("{ctrl}{key} {text:?}")
+            }
+            Pressed::Paste(text) => format!("paste {text:?}"),
+        });
         Command::none()
     }
 }
@@ -42,11 +50,12 @@ impl FeatureView<Keys> for KeysView {
         _cx: &mut gpui::App,
     ) -> impl gpui::IntoElement + use<> {
         KeyCapture::new("keys")
-            .on_key(dispatcher.map(|press: KeyPress| Pressed {
+            .on_key(dispatcher.map(|press: KeyPress| Pressed::Key {
                 key: press.key,
                 text: press.text,
                 ctrl: press.ctrl,
             }))
+            .on_paste(dispatcher.map(Pressed::Paste))
             .child(Text::new("type here"))
     }
 }
@@ -89,4 +98,53 @@ fn keys_are_reported_once_the_area_is_clicked(cx: &mut TestAppContext) {
         log(&store, cx),
         [r#"a Some("a")"#, "ctrl-c None", r#"enter Some("\n")"#]
     );
+}
+
+#[gpui::test]
+fn the_paste_shortcut_dispatches_the_clipboard_text(cx: &mut TestAppContext) {
+    let (store, cx) = open(cx);
+    cx.write_to_clipboard(gpui::ClipboardItem::new_string("ls -l".into()));
+
+    cx.simulate_click(point(px(20.), px(10.)), Modifiers::none());
+    let paste = if cfg!(target_os = "macos") {
+        "cmd-v"
+    } else {
+        "ctrl-shift-v"
+    };
+    cx.simulate_keystrokes(paste);
+    cx.simulate_keystrokes("shift-insert");
+    cx.run_until_parked();
+
+    let expected = if cfg!(target_os = "macos") {
+        vec![r#"paste "ls -l""#, r#"insert None"#]
+    } else {
+        vec![r#"paste "ls -l""#, r#"paste "ls -l""#]
+    };
+    assert_eq!(log(&store, cx), expected);
+}
+
+#[test]
+fn only_the_platform_shortcut_is_a_paste() {
+    let press = |key: &str, ctrl, shift, platform| KeyPress {
+        key: key.into(),
+        ctrl,
+        shift,
+        platform,
+        ..KeyPress::default()
+    };
+    let ctrl_v = press("v", true, false, false);
+    assert!(!ctrl_v.is_paste(), "ctrl-v belongs to the program");
+    let ctrl_alt_shift_v = KeyPress {
+        alt: true,
+        ..press("v", true, true, false)
+    };
+    assert!(!ctrl_alt_shift_v.is_paste());
+    if cfg!(target_os = "macos") {
+        assert!(press("v", false, false, true).is_paste());
+    } else {
+        assert!(press("v", true, true, false).is_paste());
+        assert!(press("V", true, true, false).is_paste());
+        assert!(press("insert", false, true, false).is_paste());
+        assert!(!press("insert", true, true, false).is_paste());
+    }
 }
