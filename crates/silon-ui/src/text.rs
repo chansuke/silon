@@ -22,6 +22,7 @@ pub struct Text {
     size: TextSize,
     tone: Tone,
     strikethrough: bool,
+    mono: bool,
 }
 
 impl Text {
@@ -31,6 +32,7 @@ impl Text {
             size: TextSize::Body,
             tone: Tone::Neutral,
             strikethrough: false,
+            mono: false,
         }
     }
 
@@ -48,6 +50,12 @@ impl Text {
         self.strikethrough = strikethrough;
         self
     }
+
+    /// Draws in the theme's monospaced font, so columns line up.
+    pub fn mono(mut self) -> Self {
+        self.mono = true;
+        self
+    }
 }
 
 impl RenderOnce for Text {
@@ -63,6 +71,7 @@ impl RenderOnce for Text {
             .text_size(size)
             .text_color(theme.tone(self.tone))
             .when(self.strikethrough, |d| d.line_through())
+            .when(self.mono, |d| d.font_family(theme.font_mono.clone()))
             .child(self.content)
     }
 }
