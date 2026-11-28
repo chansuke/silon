@@ -22,7 +22,10 @@ fn main() {
     Application::new().run(|cx: &mut App| {
         silon_ui::init(cx);
 
-        let store = cx.new(|cx| TermStore::new(TermState::new(shell()), TermRunner::new(), cx));
+        let store = cx.new(|cx| {
+            TermStore::new(TermState::new(shell()), TermRunner::new(), cx)
+                .on_app(runner::run_on_app)
+        });
         store.update(cx, |store, cx| store.dispatch(TermAction::NewSession, cx));
 
         #[cfg(feature = "introspect")]

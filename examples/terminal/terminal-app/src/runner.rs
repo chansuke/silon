@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use gpui::{App, ClipboardItem};
 use silon_core::{BoxFuture, BoxStream, EffectRunner, Mailboxes};
 use terminal_core::{Input, Pty, TermAction, TermEffect, Terminal};
 
@@ -25,6 +26,18 @@ impl TermRunner {
     }
 }
 
+/// Runs the effects that need the app, for `Store::on_app`, and hands
+/// back the rest.
+pub fn run_on_app(effect: TermEffect, cx: &mut App) -> Result<Option<TermAction>, TermEffect> {
+    match effect {
+        TermEffect::Copy(text) => {
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
+            Ok(None)
+        }
+        other => Err(other),
+    }
+}
+
 impl EffectRunner<Terminal> for TermRunner {
     fn run(&self, effect: TermEffect) -> BoxFuture<'static, Option<TermAction>> {
         match effect {
@@ -34,6 +47,8 @@ impl EffectRunner<Terminal> for TermRunner {
                 let _ = self.inputs.post(&to, input);
                 Box::pin(async { None })
             }
+            // `run_on_app` takes these first; a store without it cannot copy.
+            TermEffect::Copy(_) => Box::pin(async { None }),
         }
     }
 
