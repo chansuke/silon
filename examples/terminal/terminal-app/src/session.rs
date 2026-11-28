@@ -246,9 +246,15 @@ impl Session {
                 running.pty.resize(size)?;
                 return Ok(true);
             }
+            Input::Scroll(lines) => {
+                let bytes = running.engine.scroll(lines).map_err(io_error)?;
+                running.writer.write_all(&bytes)?;
+                return Ok(true);
+            }
         };
         running.writer.write_all(&bytes)?;
-        Ok(false)
+        // Typing returns the view to the latest output.
+        Ok(true)
     }
 
     /// Reports the screen; returns false when nobody listens any more.
