@@ -31,7 +31,7 @@ jobs:
           # Pull requests restore the cache that main saves.
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Test the pure crates
-        run: nix develop -c cargo test --locked -p silon-core -p counter-core -p todo-core -p herdboard-core
+        run: nix develop -c cargo test --locked -p silon-core -p counter-core -p todo-core -p herdboard-core -p terminal-core
       - name: Run clippy
         run: |
           nix develop -c cargo clippy --locked --workspace --all-targets -- -D warnings

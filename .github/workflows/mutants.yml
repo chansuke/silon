@@ -53,7 +53,7 @@ jobs:
             mutants_args=(--in-diff "$DIFF_FILE")
           fi
           nix develop -c cargo mutants --all-features -o "$RUNNER_TEMP" "${mutants_args[@]}" \
-            -p silon-core -p counter-core -p todo-core -p herdboard-core \
+            -p silon-core -p counter-core -p todo-core -p herdboard-core -p terminal-core \
             -p silon-introspect -p silon-gpui -p silon-mcp
       - name: Report the mutants the tests missed
         if: ${{ !cancelled() }}

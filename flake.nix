@@ -50,6 +50,9 @@
                   rustfmt
                   rust-analyzer
                   curl
+                  # Builds libghostty-vt for examples/terminal where no
+                  # prebuilt library exists.
+                  zig_0_17
                   # Checks that CI runs (see .github/workflows).
                   cargo-deny
                   cargo-mutants

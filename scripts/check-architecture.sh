@@ -30,6 +30,7 @@ forbid silon-core 'gpui|tokio' --all-features
 forbid counter-core 'gpui|tokio' --all-features
 forbid todo-core 'gpui|tokio' --all-features
 forbid herdboard-core 'gpui|tokio' --all-features
+forbid terminal-core 'gpui|tokio' --all-features
 forbid silon-introspect 'gpui' --all-features
 forbid silon-gpui 'silon-introspect|axum'
 forbid silon-ui 'silon-introspect' --all-features
@@ -37,9 +38,11 @@ forbid silon-mcp 'gpui|silon-core|silon-gpui|silon-introspect|silon-ui' --all-fe
 forbid counter-app 'axum'
 forbid todo-app 'axum'
 forbid herdboard-app 'axum'
+forbid terminal-app 'axum'
 forbid counter-app 'rmcp' --all-features
 forbid todo-app 'rmcp' --all-features
 forbid herdboard-app 'rmcp' --all-features
+forbid terminal-app 'rmcp' --all-features
 
 raw_colors=$(grep -rnE '\b(rgb|rgba|hsla)\(' examples/*/*-app/src || true)
 if [[ -n $raw_colors ]]; then

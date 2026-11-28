@@ -37,6 +37,11 @@ screen to type into it.
 Pass the socket path as the first argument, or it uses `HC_SOCKET` or the default
 path of the `HC_SESSION` session.
 
+`terminal-app` is a terminal: your shell in a PTY, with
+[libghostty-vt](https://ghostty.org) as the VT emulator and Silon for the
+window. On Linux it builds libghostty-vt with Zig 0.17, which the dev shell
+provides.
+
 On a Linux distribution other than NixOS, GPUI cannot find the host's Vulkan
 drivers from the Nix shell. Use nixGL, or Mesa's software renderer:
 
