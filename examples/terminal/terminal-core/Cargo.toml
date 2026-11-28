@@ -1,0 +1,15 @@
+[package]
+name = "terminal-core"
+description = "Pure terminal workspace feature for the Silon example app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+schemars.workspace = true
+serde.workspace = true
+silon-core.workspace = true
