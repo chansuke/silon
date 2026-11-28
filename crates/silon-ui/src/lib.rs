@@ -2,7 +2,7 @@
 //!
 //! Views build their screens from the stateless primitives here ([`Stack`],
 //! [`Row`], [`Panel`], [`Text`], [`Button`], [`Badge`], [`Checkbox`],
-//! [`KeyCapture`]), which take every color, space and size from the active [`Theme`]. The
+//! [`KeyCapture`], [`TextGrid`]), which take every color, space and size from the active [`Theme`]. The
 //! `components` feature adds adapters around gpui-component's stateful
 //! widgets.
 
@@ -14,6 +14,7 @@ pub mod components;
 mod key_capture;
 mod layout;
 mod text;
+mod text_grid;
 mod theme;
 
 pub use badge::Badge;
@@ -22,6 +23,7 @@ pub use checkbox::Checkbox;
 pub use key_capture::{KeyCapture, KeyPress};
 pub use layout::{Align, Flex, Justify, Panel, Row, Stack};
 pub use text::{Text, TextSize};
+pub use text_grid::{GridSize, Rgb, Span, TextGrid};
 pub use theme::{Colors, Space, Theme, Tone};
 
 /// Installs the default theme. Call once at startup, before opening windows.
