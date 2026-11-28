@@ -10,7 +10,9 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+futures-channel.workspace = true
 futures-core.workspace = true
+futures-io.workspace = true
 schemars.workspace = true
 serde.workspace = true
 
