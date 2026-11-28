@@ -13,20 +13,29 @@ struct Grid;
 struct GridState {
     size: GridSize,
     reports: u32,
+    scrolled: Vec<i32>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-struct Fits(u16, u16);
+enum GridAction {
+    Fits(u16, u16),
+    Scrolled(i32),
+}
 
 impl Feature for Grid {
     type State = GridState;
-    type Action = Fits;
+    type Action = GridAction;
     type Effect = std::convert::Infallible;
     type Subscription = std::convert::Infallible;
 
-    fn update(state: &mut GridState, Fits(cols, rows): Fits) -> Command<Self::Effect> {
-        state.size = (cols, rows);
-        state.reports += 1;
+    fn update(state: &mut GridState, action: GridAction) -> Command<Self::Effect> {
+        match action {
+            GridAction::Fits(cols, rows) => {
+                state.size = (cols, rows);
+                state.reports += 1;
+            }
+            GridAction::Scrolled(lines) => state.scrolled.push(lines),
+        }
         Command::none()
     }
 }
@@ -36,14 +45,16 @@ struct GridView;
 impl FeatureView<Grid> for GridView {
     fn view(
         state: &GridState,
-        dispatcher: Dispatcher<Fits>,
+        dispatcher: Dispatcher<GridAction>,
         _window: &mut gpui::Window,
         _cx: &mut gpui::App,
     ) -> impl gpui::IntoElement + use<> {
-        TextGrid::new(Vec::new()).fit(
-            state.size,
-            dispatcher.map(|(cols, rows): GridSize| Fits(cols, rows)),
-        )
+        TextGrid::new(Vec::new())
+            .fit(
+                state.size,
+                dispatcher.map(|(cols, rows): GridSize| GridAction::Fits(cols, rows)),
+            )
+            .on_scroll("grid", dispatcher.map(GridAction::Scrolled))
     }
 }
 
@@ -75,4 +86,22 @@ fn the_size_that_fits_is_reported_once(cx: &mut TestAppContext) {
     let (cols, rows) = state.size;
     assert!(cols > 1 && rows > 1, "reported {:?}", state.size);
     assert_eq!(state.reports, 1);
+}
+
+#[gpui::test]
+fn wheel_events_become_whole_lines(cx: &mut TestAppContext) {
+    let (store, cx) = open(cx);
+    let wheel = |y: f32| gpui::ScrollWheelEvent {
+        position: gpui::point(gpui::px(20.), gpui::px(20.)),
+        delta: gpui::ScrollDelta::Lines(gpui::point(0., y)),
+        ..Default::default()
+    };
+
+    cx.simulate_event(wheel(2.));
+    cx.simulate_event(wheel(-0.5));
+    cx.simulate_event(wheel(-0.5));
+    cx.run_until_parked();
+
+    let scrolled = store.read_with(cx, |store, _| store.state().scrolled.clone());
+    assert_eq!(scrolled, [-2, 1]);
 }

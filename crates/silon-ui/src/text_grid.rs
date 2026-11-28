@@ -1,7 +1,7 @@
 use gpui::{
-    App, Bounds, FontStyle, FontWeight, Hsla, IntoElement, ParentElement, Pixels, RenderOnce, Rgba,
-    Styled, StyledText, TextRun, UnderlineStyle, Window, canvas, div, font, prelude::FluentBuilder,
-    px,
+    App, Bounds, ElementId, FontStyle, FontWeight, Hsla, InteractiveElement, IntoElement,
+    ParentElement, Pixels, RenderOnce, Rgba, ScrollDelta, ScrollWheelEvent, Styled, StyledText,
+    TextRun, UnderlineStyle, Window, canvas, div, font, prelude::FluentBuilder, px,
 };
 use silon_gpui::Dispatcher;
 
@@ -47,6 +47,7 @@ pub struct TextGrid {
     lines: Vec<Vec<Span>>,
     cursor: Option<(usize, usize)>,
     fit: Option<Fit>,
+    scroll: Option<(ElementId, Dispatcher<i32>)>,
 }
 
 /// Columns and rows of a grid.
@@ -59,6 +60,21 @@ struct Fit {
 
 /// Line height as a multiple of the font size.
 const LINE_HEIGHT: f32 = 1.3;
+
+/// The whole lines a wheel event scrolls, up when negative, and the
+/// fraction left to carry to the next one.
+fn wheel_lines(delta: ScrollDelta, line_height: Pixels, carry: f32) -> (i32, f32) {
+    // GPUI's deltas are positive when the content should move down, which
+    // is scrolling up.
+    let lines = match delta {
+        ScrollDelta::Lines(lines) => -lines.y,
+        ScrollDelta::Pixels(pixels) => -f32::from(pixels.y) / f32::from(line_height).max(1.),
+    };
+    let total = carry + lines;
+    let whole = total.trunc();
+    // Saturates; a wheel never scrolls that far.
+    (whole as i32, total - whole)
+}
 
 /// The columns and rows of `cell` that fit in `bounds`, at least one each.
 fn cells_in(bounds: Bounds<Pixels>, cell: gpui::Size<Pixels>) -> GridSize {
@@ -79,7 +95,16 @@ impl TextGrid {
             lines,
             cursor: None,
             fit: None,
+            scroll: None,
         }
+    }
+
+    /// Dispatches whole lines scrolled with the wheel or touchpad, up when
+    /// negative. Fractions of a line carry over to the next event, which
+    /// `id` keys.
+    pub fn on_scroll(mut self, id: impl Into<ElementId>, on_scroll: Dispatcher<i32>) -> Self {
+        self.scroll = Some((id.into(), on_scroll));
+        self
     }
 
     /// Fills the space it is given and dispatches the columns and rows that
@@ -212,7 +237,11 @@ fn render_line(
 }
 
 impl RenderOnce for TextGrid {
-    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let scroll = self.scroll.map(|(id, on_scroll)| {
+            let carry = window.use_keyed_state(id, cx, |_, _| 0f32);
+            (on_scroll, carry)
+        });
         let theme = Theme::of(cx);
         let family = theme.font_mono.clone();
         let size = theme.text_body;
@@ -251,6 +280,15 @@ impl RenderOnce for TextGrid {
             .text_size(size)
             .line_height(line_height)
             .children(measure)
+            .when_some(scroll, |d, (on_scroll, carry)| {
+                d.on_scroll_wheel(move |event: &ScrollWheelEvent, _, cx| {
+                    let (lines, rest) = wheel_lines(event.delta, line_height, *carry.read(cx));
+                    carry.update(cx, |carry, _| *carry = rest);
+                    if lines != 0 {
+                        on_scroll.dispatch(lines, cx);
+                    }
+                })
+            })
             .children(self.lines.iter().enumerate().map(|(row, spans)| {
                 let col = self.cursor.and_then(|(r, c)| (r == row).then_some(c));
                 div().h(line_height).whitespace_nowrap().child(render_line(
@@ -334,6 +372,19 @@ mod tests {
             cells_in(bounds(800., 540.), gpui::size(px(0.), px(0.))),
             (800, 540)
         );
+    }
+
+    #[test]
+    fn wheel_lines_scroll_up_for_positive_deltas_and_carry_fractions() {
+        let line = px(20.);
+        let lines = |y: f32| ScrollDelta::Lines(gpui::point(0., y));
+        let pixels = |y: f32| ScrollDelta::Pixels(gpui::point(px(0.), px(y)));
+
+        assert_eq!(wheel_lines(lines(3.), line, 0.), (-3, 0.));
+        assert_eq!(wheel_lines(lines(-1.), line, 0.), (1, 0.));
+        assert_eq!(wheel_lines(pixels(-50.), line, 0.), (2, 0.5));
+        assert_eq!(wheel_lines(pixels(-10.), line, 0.5), (1, 0.));
+        assert_eq!(wheel_lines(pixels(5.), line, 0.), (0, -0.25));
     }
 
     #[test]
