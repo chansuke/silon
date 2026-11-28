@@ -31,6 +31,11 @@ cargo test --workspace --all-features
 cargo run -p counter-app --features introspect   # HTTP API on 127.0.0.1:3737
 ```
 
+`herdboard-app` shows the terminals of a running
+[herdr-core](https://github.com/herdrdev/herdr-core) and sends text to them.
+Pass the socket path as the first argument, or it uses `HC_SOCKET` or the default
+path of the `HC_SESSION` session.
+
 On a Linux distribution other than NixOS, GPUI cannot find the host's Vulkan
 drivers from the Nix shell. Use nixGL, or Mesa's software renderer:
 
