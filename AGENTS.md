@@ -43,8 +43,9 @@ All application logic MUST follow the unidirectional data flow: `Action -> updat
 ### 3.2 Side Effects (`EffectRunner`)
 - All async IO (HTTP, DB, filesystem, timers) MUST be implemented in `EffectRunner<F>` inside `<app>-app`.
 - Long-lived streams (sockets, file watchers, intervals) MUST be opened in `EffectRunner::subscribe`, never kept in `State` or spawned from `run`.
-- To write to an open stream (keys to a terminal, frames to a socket), open a `silon_core::Mailbox` in `subscribe` under the subscription value and `post` to it from `run` by the same value. Post in `run` itself, not in the future it returns, so messages keep dispatch order.
+- To write to an open stream (keys to a terminal, frames to a socket), open a `silon_core::Mailbox` in `subscribe` under the subscription value and `post` to it from `run` by the same value. Post in `run` itself, not in the future it returns, so messages keep dispatch order. The store opens subscriptions before it runs effects, so an update may open a stream and post to it at once (e.g., a new session and its size).
 - Protocol logic (framing, parsing, handshakes) MUST be a `silon_core::Protocol` in `<app>-core`, tested by feeding it bytes and reading the `Exchange`. The runner only connects and hands the connection to `silon_core::converse`.
+- An engine that needs a native library or is `!Send` (e.g., libghostty-vt) stays in `<app>-app` behind a sans-IO wrapper tested with bytes, and runs on a thread its subscription owns. The thread only moves bytes between the engine, the IO and the mailbox.
 - Waiting (retry delays, timeouts) MUST be an `Effect` whose completion is an `Action`. A runner MUST NOT sleep on its own, so the state always shows what it waits for.
 - `Store<F, R>` is the sole owner of `cx.spawn()` and `cx.notify()`. Application code **MUST NOT** call `cx.notify()` manually.
 
@@ -59,7 +60,9 @@ All application logic MUST follow the unidirectional data flow: `Action -> updat
 2. **Hybrid Component Boundary**:
    - **Stateless primitives** (`Stack`, `Row`, `Panel`, `Button`, `Text`, `Badge`): Build/use from `silon-ui` with semantic design tokens. Avoid raw hex colors or ad-hoc pixel layouts in app views.
    - **Complex stateful widgets** (IME-aware `TextInput`, `CodeEditor`, `VirtualTable`, `DatePicker`): Wrap `gpui-component` inside dedicated adapters in `silon-ui`. Keep ephemeral UI state (cursor, IME composition) local to the widget and emit `Action` via `Dispatcher` only on meaningful state transitions (e.g., `on_change`, `on_submit`, `on_blur`).
-3. **Composition**:
+3. **Layout Size**:
+   - Views MUST NOT read the window or layout size while rendering. A primitive reports the size it was laid out at as an action (e.g., `TextGrid::fit` for columns and rows), and the state decides what to do with it.
+4. **Composition**:
    - For nested features, transform child actions to parent actions using `Dispatcher::map` rather than passing parent stores down.
 
 ---
