@@ -15,8 +15,8 @@ permissions:
 
 jobs:
   # Every mutant of the listed crates must make a test fail. Each mutant
-  # rebuilds its crate, so the GUI/app crates (`silon-ui`, `counter-app`,
-  # `todo-app`) are excluded to keep build cost bounded.
+  # rebuilds its crate, so the GUI/app crates (`silon-ui` and the `*-app`
+  # crates) are excluded to keep build cost bounded.
   mutants:
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -53,7 +53,7 @@ jobs:
             mutants_args=(--in-diff "$DIFF_FILE")
           fi
           nix develop -c cargo mutants --all-features -o "$RUNNER_TEMP" "${mutants_args[@]}" \
-            -p silon-core -p counter-core -p todo-core \
+            -p silon-core -p counter-core -p todo-core -p herdboard-core \
             -p silon-introspect -p silon-gpui -p silon-mcp
       - name: Report the mutants the tests missed
         if: ${{ !cancelled() }}
