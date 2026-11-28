@@ -23,7 +23,7 @@ pub use checkbox::Checkbox;
 pub use key_capture::{KeyCapture, KeyPress};
 pub use layout::{Align, Flex, Justify, Panel, Row, Stack};
 pub use text::{Text, TextSize};
-pub use text_grid::{GridSize, Rgb, Span, TextGrid};
+pub use text_grid::{GridPoint, GridPointer, GridSize, Rgb, Span, TextGrid};
 pub use theme::{Colors, Space, Theme, Tone};
 
 /// Installs the default theme. Call once at startup, before opening windows.
