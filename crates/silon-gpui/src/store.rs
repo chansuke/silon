@@ -34,8 +34,10 @@ impl<F: Feature, R: EffectRunner<F>> Store<F, R> {
         &self.state
     }
 
-    /// Applies `action`, notifies observers, then runs each emitted effect
-    /// and brings the running subscriptions in line with the new state.
+    /// Applies `action`, notifies observers, brings the running
+    /// subscriptions in line with the new state, then runs each emitted
+    /// effect. Subscriptions come first so that an effect can post to the
+    /// mailbox of a stream the same update opened.
     ///
     /// Effect futures run on the background executor; a follow-up action they
     /// return is dispatched back on the main thread. Follow-ups are dropped if
@@ -55,6 +57,7 @@ impl<F: Feature, R: EffectRunner<F>> Store<F, R> {
         }
 
         cx.notify();
+        self.reconcile_subscriptions(cx);
 
         for effect in effects {
             let future = self.runner.run(effect);
@@ -67,8 +70,6 @@ impl<F: Feature, R: EffectRunner<F>> Store<F, R> {
             })
             .detach();
         }
-
-        self.reconcile_subscriptions(cx);
     }
 
     /// Stops the subscriptions the state no longer asks for and starts the
