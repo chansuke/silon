@@ -1,9 +1,12 @@
 use gpui::{App, ElementId, IntoElement, ParentElement, SharedString, Window};
-use herdboard_core::{HerdAction, HerdState, Herdboard, Link, Notice, Status, Terminal};
+use herdboard_core::{
+    HerdAction, HerdState, Herdboard, Key, Link, Notice, Screen, Status, Terminal,
+};
 use silon_gpui::{Dispatcher, FeatureView};
 use silon_ui::components::TextInput;
 use silon_ui::{
-    Align, Badge, Button, ButtonVariant, Panel, Row, Space, Stack, Text, TextSize, Tone,
+    Align, Badge, Button, ButtonVariant, KeyCapture, KeyPress, Panel, Row, Space, Stack, Text,
+    TextSize, Tone,
 };
 
 pub struct HerdView;
@@ -33,7 +36,10 @@ fn header(state: &HerdState) -> Row {
     let (link, tone) = match &state.link {
         Link::Connecting => ("connecting".to_owned(), Tone::Muted),
         Link::Live => ("live".to_owned(), Tone::Success),
-        Link::Down(error) => (format!("reconnecting: {error}"), Tone::Danger),
+        Link::Waiting { error, delay_ms } => (
+            format!("{error}; retrying in {} s", delay_ms.div_ceil(1000)),
+            Tone::Danger,
+        ),
     };
     Row::new()
         .gap(Space::Md)
@@ -144,6 +150,73 @@ fn detail(state: &HerdState, dispatcher: &Dispatcher<HerdAction>) -> Panel {
                 .as_ref()
                 .map(|notice| caption(describe(notice))),
         )
+        .child(screen(state, dispatcher))
+}
+
+/// The attached screen, which takes the keyboard when clicked.
+fn screen(state: &HerdState, dispatcher: &Dispatcher<HerdAction>) -> Stack {
+    let caption = |text: String| Text::new(text).size(TextSize::Caption).tone(Tone::Muted);
+    if let Some(reason) = &state.attachment.ended {
+        return Stack::new()
+            .gap(Space::Sm)
+            .child(caption(format!("detached: {reason}")))
+            .child(
+                Button::new("reattach", "Attach again").on_press(dispatcher, HerdAction::Reattach),
+            );
+    }
+    let attached = state.attach_stream().is_some();
+    let Some(screen) = &state.attachment.screen else {
+        let waiting = attached.then(|| caption("attaching".into()));
+        return Stack::new().children(waiting);
+    };
+    if !attached {
+        // A finished terminal keeps its last screen, without the keyboard.
+        return Stack::new().children(lines(screen));
+    }
+    Stack::new().child(
+        KeyCapture::new("screen")
+            .on_key(dispatcher.map(|press: KeyPress| {
+                HerdAction::Key(Key {
+                    key: press.key,
+                    text: press.text,
+                    ctrl: press.ctrl,
+                    alt: press.alt,
+                })
+            }))
+            .children(lines(screen)),
+    )
+}
+
+fn line(text: impl Into<SharedString>) -> Text {
+    Text::new(text).mono().size(TextSize::Caption)
+}
+
+/// One row of text per screen row, with a block where the cursor is.
+fn lines(screen: &Screen) -> Vec<Row> {
+    let (cursor_row, cursor_col) = screen.cursor;
+    screen
+        .lines
+        .iter()
+        .enumerate()
+        .map(|(row, text)| {
+            if row != usize::from(cursor_row) {
+                // An empty text has no height; a space keeps the row.
+                let text = if text.is_empty() { " " } else { text };
+                return Row::new().child(line(text.to_owned()));
+            }
+            let mut chars: Vec<char> = text.chars().collect();
+            let col = usize::from(cursor_col);
+            if chars.len() <= col {
+                chars.resize(col + 1, ' ');
+            }
+            let before: String = chars[..col].iter().collect();
+            let after: String = chars[col + 1..].iter().collect();
+            Row::new()
+                .child(line(before))
+                .child(line("\u{2588}").tone(Tone::Accent))
+                .child(line(after))
+        })
+        .collect()
 }
 
 fn describe(notice: &Notice) -> String {

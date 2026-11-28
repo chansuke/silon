@@ -42,12 +42,12 @@ fn main() {
         silon_ui::init(cx);
         components::init(cx);
 
-        let store = cx.new(|cx| HerdStore::new(HerdState::new(socket), HerdRunner, cx));
+        let store = cx.new(|cx| HerdStore::new(HerdState::new(socket), HerdRunner::default(), cx));
 
         #[cfg(feature = "introspect")]
         start_introspection(&store, cx);
 
-        let bounds = Bounds::centered(None, size(px(880.), px(560.)), cx);
+        let bounds = Bounds::centered(None, size(px(1200.), px(820.)), cx);
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
